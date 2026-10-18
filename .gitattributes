@@ -1,0 +1,4 @@
+# Preserve exact bytes (LF) for all files: contract content-hashes are
+# computed over LF-normalized bytes with the sha256 field excluded
+# (see master PLAN.md registry). No EOL conversion, no smudge filters.
+* -text

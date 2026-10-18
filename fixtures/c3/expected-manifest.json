@@ -1,0 +1,70 @@
+{
+  "alpha": true,
+  "canned_mask": {
+    "box": [
+      128,
+      128,
+      384,
+      384
+    ],
+    "mode": "L",
+    "outside": 0,
+    "size": [
+      512,
+      512
+    ],
+    "square": 256,
+    "square_fill": 255
+  },
+  "export": {
+    "files": [
+      {
+        "filename": "icon.png",
+        "height": 272,
+        "scale": 1,
+        "width": 272
+      },
+      {
+        "filename": "icon@2x.png",
+        "height": 544,
+        "scale": 2,
+        "width": 544
+      },
+      {
+        "filename": "icon@3x.png",
+        "height": 816,
+        "scale": 3,
+        "width": 816
+      }
+    ],
+    "note": "contract field path = output_dir joined with filename leaf",
+    "sizes": [
+      1,
+      2,
+      3
+    ],
+    "stem": "icon"
+  },
+  "input": {
+    "height": 512,
+    "mode": "RGB",
+    "path": "fixtures/c3/input-512.png",
+    "width": 512
+  },
+  "model_used_rule": "echo of the requested model string passed to remove_background/process",
+  "pad_px": 8,
+  "padded": {
+    "height": 272,
+    "width": 272
+  },
+  "post_trim_bbox": [
+    128,
+    128,
+    384,
+    384
+  ],
+  "trimmed": {
+    "height": 256,
+    "width": 256
+  }
+}

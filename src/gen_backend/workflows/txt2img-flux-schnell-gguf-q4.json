@@ -1,0 +1,110 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "flux1-schnell-Q4_K_S.gguf"
+    }
+  },
+  "2": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux",
+      "device": "cpu"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "orange delivery scooter icon, flat design",
+      "clip": ["2", 0]
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "",
+      "clip": ["2", 0]
+    }
+  },
+  "6": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "batch_size": 1
+    }
+  },
+  "10": {
+    "class_type": "ModelSamplingFlux",
+    "inputs": {
+      "model": ["1", 0],
+      "width": 512,
+      "height": 512,
+      "guidance": 0.0,
+      "max_shift": 1.15,
+      "base_shift": 0.5
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["10", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["6", 0],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["3", 0]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "gen_backend/txt2img",
+      "images": ["8", 0]
+    }
+  },
+  "_meta": {
+    "workflow_id": "txt2img-flux-schnell-gguf-q4",
+    "variant": "DEFAULT — 10 GB VRAM target (RTX 3080 10 GB)",
+    "contract": "C2-gen-backend-job v0.1.0",
+    "loader": "ComfyUI-GGUF custom node (city96 ComfyUI-GGUF extension): UnetLoaderGGUF",
+    "backbone": "Q4_K_S GGUF (~6.8 GB file, ~6.5 GB peak with T5-XXL offloaded to CPU)",
+    "text_encoders": "T5-XXL + CLIP-L via DualCLIPLoader on CPU (device=cpu)",
+    "vae": "VAELoader ae.safetensors; use VAE tiling or CPU-VAE fallback on low VRAM (runtime flags, see setup_notes.md)",
+    "defaults": "512x512, 4 steps, guidance 0.0 (fixed for schnell)",
+    "required_files": [
+      {
+        "file": "flux1-schnell-Q4_K_S.gguf",
+        "placement": "models/unet/ (ComfyUI-GGUF loader dir)"
+      },
+      {
+        "file": "t5xxl_fp8_e4m3fn.safetensors + clip_l.safetensors",
+        "placement": "models/clip/"
+      },
+      {
+        "file": "ae.safetensors",
+        "placement": "models/vae/"
+      }
+    ],
+    "parameterization": "See workflow_params.md. inject_params() overwrites nodes 4 (prompt), 5 (negative), 6 (width/height), 7 (seed/steps), 10 (guidance/width/height) and strips _meta before submit."
+  }
+}

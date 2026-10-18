@@ -1,0 +1,34 @@
+# Unified-3 process scaffolding — local-only, never published
+.opencode/
+AGENTS.md
+README-UNIFIED3.md
+WORKFLOW_STATE.md
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Unified-3 internal run records (large PNG evidence, session returns)
+.workflow/
+
+# ComfyUI local outputs (if ever pointed here)
+output/
+input/
+*.safetensors
+*.gguf
+*.onnx
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs and temp
+*.log
+# Helper-script outputs live outside the repo; nothing to ignore here.

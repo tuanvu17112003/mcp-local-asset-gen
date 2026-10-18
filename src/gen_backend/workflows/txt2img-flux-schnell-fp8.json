@@ -1,0 +1,85 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "flux1-schnell-fp8.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "orange delivery scooter icon, flat design",
+      "clip": ["1", 1]
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "",
+      "clip": ["1", 1]
+    }
+  },
+  "6": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "batch_size": 1
+    }
+  },
+  "10": {
+    "class_type": "ModelSamplingFlux",
+    "inputs": {
+      "model": ["1", 0],
+      "width": 512,
+      "height": 512,
+      "guidance": 0.0,
+      "max_shift": 1.15,
+      "base_shift": 0.5
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["10", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["6", 0],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "gen_backend/txt2img",
+      "images": ["8", 0]
+    }
+  },
+  "_meta": {
+    "workflow_id": "txt2img-flux-schnell-fp8",
+    "variant": "SCALE-UP — >=12-16 GB VRAM (single FP8 file, ~17.2 GB on disk)",
+    "contract": "C2-gen-backend-job v0.1.0",
+    "loader": "Native CheckpointLoaderSimple (no custom nodes required)",
+    "defaults": "512x512, 4 steps, guidance 0.0 (fixed for schnell)",
+    "required_files": [
+      {
+        "file": "flux1-schnell-fp8.safetensors",
+        "placement": "models/checkpoints/"
+      }
+    ],
+    "missing_file_hint": "MODEL_NOT_FOUND: place flux1-schnell-fp8.safetensors in models/checkpoints/",
+    "parameterization": "See workflow_params.md. inject_params() overwrites nodes 4 (prompt), 5 (negative), 6 (width/height), 7 (seed/steps), 10 (guidance/width/height) and strips _meta before submit."
+  }
+}

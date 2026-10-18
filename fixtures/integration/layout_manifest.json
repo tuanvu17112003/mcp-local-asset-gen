@@ -1,0 +1,26 @@
+{
+  "_note": "CANNED / DRY-RUN fixture — expected asset tree for the React sample (UserProfile bear_avatar embed). For offline layout checks only. NOT live-diffusion proof (live proof is PQM0 IC-2).",
+  "output_dir": "assets/images",
+  "stem": "bear_avatar",
+  "join_rule": "path = output_dir / filename",
+  "expected": [
+    {
+      "path": "assets/images/bear_avatar.png",
+      "width": 512,
+      "height": 512,
+      "scale": "1x"
+    },
+    {
+      "path": "assets/images/bear_avatar@2x.png",
+      "width": 1024,
+      "height": 1024,
+      "scale": "2x"
+    },
+    {
+      "path": "assets/images/bear_avatar@3x.png",
+      "width": 1536,
+      "height": 1536,
+      "scale": "3x"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"backend": "comfyui", "comfyui_url": "http://127.0.0.1:8188", "models": ["flux-schnell-gguf-q4", "flux-schnell-fp8"], "version": "0.1.0", "reachable": true, "queue_depth": 0}
