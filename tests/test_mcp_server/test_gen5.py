@@ -7,6 +7,8 @@ no ``fastmcp`` import. ``tmp_path`` is the project root.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from src.mcp_server.errors import BackendUnavailableError
@@ -80,6 +82,8 @@ def test_server_info_reachable_path(monkeypatch):
     assert info["backend"] == "comfyui"
     assert info["reachable"] is True
     assert info["queue_depth"] == 3
+    assert info["project_root"] == os.path.abspath(os.getcwd())
+    assert os.path.isabs(info["project_root"])
 
 
 def test_server_info_unreachable_path(monkeypatch):
@@ -90,6 +94,8 @@ def test_server_info_unreachable_path(monkeypatch):
     info = orch.server_info()
     assert info["reachable"] is False
     assert info["queue_depth"] is None
+    assert info["project_root"] == os.path.abspath(os.getcwd())
+    assert os.path.isabs(info["project_root"])
 
 
 def test_probe_prefers_exec_info_and_never_raises(monkeypatch):

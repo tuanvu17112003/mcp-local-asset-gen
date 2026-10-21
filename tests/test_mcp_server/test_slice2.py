@@ -454,6 +454,7 @@ def test_server_info_shape(tmp_path, monkeypatch):
         "comfyui_url": "http://127.0.0.1:8188",
         "models": ["flux-schnell-gguf-q4", "flux-schnell-fp8"],
         "version": "0.1.0",
+        "project_root": os.path.abspath(os.getcwd()),
         "reachable": True,
         "queue_depth": 0,
     }
@@ -464,3 +465,6 @@ def test_server_info_shape(tmp_path, monkeypatch):
     orch2._config = cfg
     assert orch2.server_info()["comfyui_url"] == "http://127.0.0.1:8188"
     assert orch2.server_info()["version"] == "0.1.0"
+    info2 = orch2.server_info()
+    assert info2["project_root"] == os.path.abspath(os.fspath(tmp_path))
+    assert os.path.isabs(info2["project_root"])

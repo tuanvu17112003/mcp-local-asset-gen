@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -155,12 +156,13 @@ def test_path_escape_call_raises_policy_denied():
         validate_tool_args(**call)
 
 
-def test_server_info_fixture_shape(monkeypatch):
+def test_server_info_fixture_shape(monkeypatch, tmp_path):
     from src.mcp_server.orchestrator import SERVER_MODELS
     from src.mcp_server.schemas import SERVER_INFO_SCHEMA
     from src.mcp_server.config import (
         DEFAULT_COMFYUI_URL,
         SERVER_VERSION,
+        ServerConfig,
     )
     from src.mcp_server.orchestrator import AssetOrchestrator
     import src.mcp_server.orchestrator as orch_mod
@@ -175,8 +177,23 @@ def test_server_info_fixture_shape(monkeypatch):
     # Example documents the live-probe success shape (reachable + depth 0).
     assert expected["reachable"] is True
     assert expected["queue_depth"] == 0
+    # Example root is an absolute path string (platform flavors differ, so
+    # accept either absolute form); live values are asserted dynamically.
+    assert isinstance(expected["project_root"], str) and expected["project_root"]
+    from pathlib import PurePosixPath, PureWindowsPath
 
+    assert PurePosixPath(expected["project_root"]).is_absolute() or PureWindowsPath(
+        expected["project_root"]
+    ).is_absolute()
+
+    cfg = ServerConfig(project_root=str(tmp_path))
     orch = AssetOrchestrator(
-        FakeBackend(), postprocess=fake_postprocess, writer=dict_writer({})
+        FakeBackend(),
+        postprocess=fake_postprocess,
+        writer=dict_writer({}),
+        config=cfg,
     )
-    assert orch.server_info() == expected
+    assert orch.server_info() == {
+        **expected,
+        "project_root": os.path.abspath(os.fspath(tmp_path)),
+    }

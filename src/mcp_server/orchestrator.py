@@ -508,12 +508,17 @@ class AssetOrchestrator:
         cfg = self._config
         url = cfg.comfyui_url if cfg is not None else DEFAULT_COMFYUI_URL
         version = cfg.version if cfg is not None else SERVER_VERSION
+        if cfg is not None:
+            project_root = os.path.abspath(os.fspath(cfg.project_root))
+        else:
+            project_root = os.path.abspath(os.getcwd())
         reachable, queue_depth = _probe_comfyui_queue(url)
         return {
             "backend": "comfyui",
             "comfyui_url": url,
             "models": list(SERVER_MODELS),
             "version": version,
+            "project_root": project_root,
             "reachable": reachable,
             "queue_depth": queue_depth,
         }

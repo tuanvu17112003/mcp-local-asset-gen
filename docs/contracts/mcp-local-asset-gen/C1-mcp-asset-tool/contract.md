@@ -1,17 +1,14 @@
 # Interface contract — C1-mcp-asset-tool
 
-Authoritative owner: PQM0. BASELINED v0.1.1 — controlled amendments only.
-(v0.1.0: sha256:B21A372C…A3AF, frozen 2026-10-17 under Q1/Q4 + dispatch.
-v0.1.1 amendment 2026-10-18: live server_info + check_model + icon
-sizes/.ico, authorized by user "implement #2+#3".)
+Authoritative owner: PQM0. BASELINED v0.1.3 — controlled amendments only.
+(v0.1.2: sha256:EAE4D1F8…; v0.1.1: sha256:AC9192C6…; v0.1.0: sha256:B21A372C….
+v0.1.3 amendment 2026-10-21: server_info.project_root + explicit-root
+launcher rule (CWD-jail fix, user-reported). Additive; prior acks stand.)
 
 - ID / version / content hash or immutable revision:
-  `C1-mcp-asset-tool` / `v0.1.1` /
-  `sha256:AC9192C6F7FFC9D7F635F4DCCA8875EF657DC18E3E2FEE1B9F5BC21913025A60`
-  frozen 2026-10-18. Authority: user "implement #2+#3" 2026-10-18
-  (supersedes v0.1.0 B21A372C; additive only).
-- Status: Baselined v0.1.1 (was v0.1.0; additive only — all v0.1.0 behavior
-  preserved; new optional fields/tools only).
+  `C1-mcp-asset-tool` / `v0.1.3` / sha256:3EF9E64CBA465E5815BD701F8A7B6BEAFB9E32773151DEC0D91147F1A65B2681 frozen 2026-10-21
+  (LF bytes, sha256 fields excluded — see master PLAN.md registry).
+- Status: Baselined v0.1.3 (was v0.1.2; additive — prior acks stand).
 - Producer / consumers / owner:
   Producer `mod-mcp-core`; consumers `mod-integration`, external AI agents;
   PQM0 owns.
@@ -25,9 +22,17 @@ sizes/.ico, authorized by user "implement #2+#3".)
 - Operations / inputs / outputs / schema locations:
   - `generate_app_asset({prompt, category: icon|illustration|avatar|splash, save_path, width?, height?, format?: png|svg, remove_bg?: bool, style_preset?: flat|clay|line|pixel, seed?, icon_sizes?: int[], ico?: bool}) → {asset_path, width, height, format, seed, style_preset, job_id}`
   - `refine_asset({asset_id|asset_path, instruction, save_path?, strength?}) → {asset_path, job_id, parent_job_id}`
-  - `server_info() → {backend, comfyui_url, models, version, reachable: bool, queue_depth: int|null}` — live: GET /prompt ok → reachable true + queue_remaining; unreachable → reachable false, queue_depth null (NOT an error).
+  - `server_info() → {backend, comfyui_url, models, version, reachable: bool, queue_depth: int|null, project_root: string}` — live: GET /prompt ok → reachable true + queue_remaining; unreachable → reachable false, queue_depth null (NOT an error). `project_root` is the ABSOLUTE server-side jail root every save_path resolves inside — agents MUST compare it with their working directory before generating (mismatch = launcher misconfiguration, not a per-call error).
   - `check_model({name, kind?: unet|clip|vae|checkpoint}) → {available: bool, loader: string, checked_at: string}` — live: name membership in the pinned loader file list (UnetLoaderGGUF→unet_name, DualCLIPLoader→clip_name1/2, VAELoader→vae_name, CheckpointLoaderSimple→ckpt_name); kind narrows the loader set (default: all four). ComfyUI unreachable → BACKEND_UNAVAILABLE (existing code, consistent with generate).
   Schemas to live at `src/mcp_server/schemas/` (owner mod-mcp-core).
+- Server initialization instructions: `src/mcp_server/server.py`
+  `SERVER_INSTRUCTIONS` wired as FastMCP `instructions=` (MCP
+  `InitializeResult.instructions`; verified live via client handshake).
+  Content: purpose, 4 tool shapes, workflow order (server_info first),
+  jail/overwrite/refine-precondition/concurrency rules, CODE-prefixed
+  error guide, localhost/512px/stochastic limits. Token-budget guarded
+  (<4000 chars, `test_instructions_token_budget`). Clients decide
+  placement; text stays useful however presented.
 - Field types / units / encodings / nullability / defaults:
   `prompt: string (required)`; `category: enum (required)`;
   `save_path: relative POSIX path under project root (required, must stay
@@ -38,6 +43,11 @@ sizes/.ico, authorized by user "implement #2+#3".)
   multi-size container from the base PNG via Pillow; only with png output);
   `check_model kind?: unet|clip|vae|checkpoint (default all)`.
   Units px; paths UTF-8, no `..` traversal.
+  Launchers MUST set an explicit project root (`--project-root` CLI flag
+  or client `cwd`; the server's own launch directory is only a fallback
+  and the server logs a warning when it is used). The configured root is
+  always normalized to an absolute path; a non-directory root is rejected
+  at startup (`INVALID_PROJECT_ROOT`).
 - Preconditions / invariants / postconditions:
   Pre: ComfyUI reachable (or queued with explicit error); save dir writable.
   Invariant: never write outside project root; never overwrite without

@@ -10,7 +10,7 @@ section "Operations / inputs / outputs" exactly:
 * ``refine_asset({asset_id|asset_path, instruction*, save_path?, strength?, job_id?})``
   returns ``{asset_path, job_id, parent_job_id}``
 * ``server_info({})`` returns
-  ``{backend, comfyui_url, models, version, reachable, queue_depth}``
+  ``{backend, comfyui_url, models, version, project_root, reachable, queue_depth}``
 * ``check_model({name*, kind?})`` returns ``{available, loader, checked_at}``
 
 The contract's golden call is kept as :data:`BEAR_AVATAR_EXAMPLE`, a
@@ -199,12 +199,13 @@ SERVER_INFO_SCHEMA: Dict[str, Any] = {
     },
     "output_schema": {
         "type": "object",
-        "required": ["backend", "comfyui_url", "models", "version", "reachable", "queue_depth"],
+        "required": ["backend", "comfyui_url", "models", "version", "project_root", "reachable", "queue_depth"],
         "properties": {
             "backend": {"type": "string"},
             "comfyui_url": {"type": "string"},
             "models": {"type": "array", "items": {"type": "string"}},
             "version": {"type": "string"},
+            "project_root": {"type": "string"},
             "reachable": {"type": "boolean"},
             "queue_depth": {"type": ["integer", "null"]},
         },

@@ -1,8 +1,8 @@
 """Server configuration (contract ``C1-mcp-asset-tool`` v0.1.0).
 
 Pure stdlib, frozen dataclass, no I/O at import or construction.
-``project_root`` is stored as given; containment checks happen per call in
-:mod:`src.mcp_server.validation`.
+``project_root`` is normalized to an absolute path in ``__post_init__``;
+containment checks happen per call in :mod:`src.mcp_server.validation`.
 """
 
 from __future__ import annotations
@@ -54,6 +54,13 @@ class ServerConfig:
         root = os.fspath(self.project_root) if isinstance(self.project_root, os.PathLike) else self.project_root
         if not isinstance(root, str) or not root:
             raise ValueError("INVALID_PROJECT_ROOT: project_root must be a non-empty path")
+        absolute_root = os.path.abspath(root)
+        if not os.path.isdir(absolute_root):
+            raise ValueError(
+                "INVALID_PROJECT_ROOT: project_root %r is not an existing directory"
+                % (root,)
+            )
+        object.__setattr__(self, "project_root", absolute_root)
         if not isinstance(self.comfyui_url, str) or not self.comfyui_url:
             raise ValueError("INVALID_COMFYUI_URL: comfyui_url must be a non-empty URL string")
         parsed = urlparse(self.comfyui_url)

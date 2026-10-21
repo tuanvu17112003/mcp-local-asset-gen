@@ -34,3 +34,11 @@ Notes:
 - Asset writes never escape the project root: absolute paths and `..`
   traversal are refused with `POLICY_DENIED`, and existing files need
   explicit `overwrite: true`.
+
+## Foreign working directory
+
+- When the client launches from another directory, run
+  `<python> <root>/asset-gen.py --project-root <root>` (no PYTHONPATH
+  needed — the launcher puts the checkout root on `sys.path` itself).
+- Alternatively keep `-m src.mcp_server.server` with the client's `cwd`
+  set to the project root; both entrypoints share the same `main()`.

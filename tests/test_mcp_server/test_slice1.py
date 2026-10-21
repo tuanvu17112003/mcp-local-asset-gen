@@ -107,6 +107,7 @@ def test_refine_and_server_info_schema_shape():
         "comfyui_url",
         "models",
         "version",
+        "project_root",
         "reachable",
         "queue_depth",
     ]

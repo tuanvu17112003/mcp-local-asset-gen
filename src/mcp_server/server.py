@@ -44,6 +44,58 @@ if sys.version_info < (3, 11):  # pragma: no cover - env-dependent
 
 SERVER_NAME = "asset-gen"
 
+#: Server-level usage guidance, exposed via the standard MCP
+#: initialization mechanism (``InitializeResult.instructions``) so MCP
+#: clients can place it in the agent's initial context. Clients are not
+#: required to do so — the text is written to stay useful however it is
+#: presented (system prompt, preamble, or on-demand reference).
+SERVER_INSTRUCTIONS = """\
+# asset-gen — local AI asset generation (4 tools)
+
+Purpose: generate app assets (icons, illustrations, avatars, splash) with a LOCAL
+ComfyUI + rembg pipeline and save them into the project. No cloud, no uploads.
+
+Tools — call exactly these, with these shapes:
+- generate_app_asset({prompt*, category*, save_path*, width=512,
+  height=512, format="png", remove_bg=null, style_preset="flat", seed=null,
+  overwrite=false, job_id=null, icon_sizes=null, ico=false}): text-to-image,
+  then transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
+  true for icon/avatar. icon_sizes e.g. [32,64] adds -32px/-64px renders;
+  ico:true adds a multi-size .ico. format:"svg" is REFUSED (deferred).
+- refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
+  job_id=null}): image-to-image tweak; writes a NEW file, never mutates the
+  parent (default save is <stem>_refined.png). strength is (0,1].
+- check_model({name*, kind}): is a weight file present in a ComfyUI loader?
+  kind in unet|clip|vae|checkpoint (default: all). Use before generating
+  with an unusual model.
+- server_info({}): {backend, comfyui_url, models, version, project_root,
+  reachable, queue_depth}. Call FIRST: if reachable=false, do not call generate.
+
+Workflow: server_info → (check_model for non-default weights) →
+generate_app_asset → embed the returned asset_path in code → refine_asset
+to iterate (pass seed to reproduce a generation).
+
+Rules: save_path must stay inside the project root (no `..`, no absolute
+escapes, no overwrite without overwrite:true). Refine parents must exist;
+for LIVE img2img the parent basename must pre-exist in ComfyUI's input dir.
+At most 2 concurrent jobs (excess → QUEUED with job_id; reuse job_id for
+idempotent retry).
+
+Errors (machine-readable CODE prefix; fix the cause, don't blindly retry):
+BACKEND_UNAVAILABLE (ComfyUI down — verify url/port via server_info);
+GENERATION_FAILED (covers JOB_FAILED/JOB_TIMEOUT payloads); POLICY_DENIED
+(bad path/overwrite — fix args); INVALID_* (bad args — rejected
+pre-backend); POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
+postprocess-internal opt-in, no tool param — use the default model).
+
+Limits: localhost ComfyUI only (allow_remote opt-in exists; default stays
+local); 512px default, backend schnell 1–4 steps (fixed, no steps param);
+generation is stochastic; postprocess trims/pads and center-crops icons.
+Unit tests mock down-backend paths; the live server probes via server_info
+GET /prompt only.
+"""
+
+
 
 def _ensure_src_on_sys_path() -> None:
     """Fallback: put the ``src/`` layout parent on ``sys.path``.
@@ -152,6 +204,12 @@ def create_server(
 
     if config is None:
         config = ServerConfig(project_root=os.getcwd())
+        log.warning(
+            "asset-gen: no ServerConfig given; falling back to cwd %r as "
+            "project_root — pass an explicit ServerConfig(project_root=...) "
+            "for a stable asset jail.",
+            os.getcwd(),
+        )
     backend = (
         backend_factory()
         if callable(backend_factory)
@@ -168,7 +226,7 @@ def create_server(
     )
     project_root = config.project_root
 
-    mcp = FastMCP(SERVER_NAME)
+    mcp = FastMCP(SERVER_NAME, instructions=SERVER_INSTRUCTIONS)
 
     @mcp.tool
     def generate_app_asset(
@@ -285,6 +343,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Any] = None) -> int:
     """Parse args, wire real backend/postprocess, and run the server."""
+    raw = sys.argv[1:] if argv is None else argv
+    try:
+        explicit_root = any(
+            arg == "--project-root"
+            or (isinstance(arg, str) and arg.startswith("--project-root="))
+            for arg in raw
+        )
+    except TypeError:
+        explicit_root = False
+    if not explicit_root:
+        log.warning(
+            "asset-gen: --project-root not given; falling back to cwd %r as "
+            "the asset jail — pass an explicit --project-root for a stable root.",
+            os.getcwd(),
+        )
     args = build_arg_parser().parse_args(argv)
     config = ServerConfig(
         project_root=args.project_root,
@@ -308,6 +381,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "SERVER_INSTRUCTIONS",
     "SERVER_NAME",
     "build_arg_parser",
     "create_server",
