@@ -83,6 +83,8 @@ def test_generate_schema_shape():
     out_required = GENERATE_APP_ASSET_SCHEMA["output_schema"]["required"]
     assert out_required == [
         "asset_path",
+        "asset_path_absolute",
+        "asset_root",
         "width",
         "height",
         "format",
@@ -98,6 +100,8 @@ def test_refine_and_server_info_schema_shape():
     assert refine_in["anyOf"] == [{"required": ["asset_id"]}, {"required": ["asset_path"]}]
     assert REFINE_ASSET_SCHEMA["output_schema"]["required"] == [
         "asset_path",
+        "asset_path_absolute",
+        "asset_root",
         "job_id",
         "parent_job_id",
     ]
@@ -108,6 +112,8 @@ def test_refine_and_server_info_schema_shape():
         "models",
         "version",
         "project_root",
+        "workspaces",
+        "allow_any_path",
         "reachable",
         "queue_depth",
     ]
@@ -115,7 +121,7 @@ def test_refine_and_server_info_schema_shape():
 
 @pytest.mark.parametrize(
     "evil",
-    ["../../etc/pass.png", "/etc/pass.png", "a/../../b.png", "..\\windows\\x.png", "C:/evil.png"],
+    ["../../etc/pass.png", "a/../../b.png", "..\\windows\\x.png"],
 )
 def test_path_escape_rejected(tmp_path, evil):
     with pytest.raises(PolicyDeniedError) as excinfo:
@@ -123,6 +129,19 @@ def test_path_escape_rejected(tmp_path, evil):
     assert "POLICY_DENIED" in str(excinfo.value)
     with pytest.raises(PolicyDeniedError):
         validate_tool_args("p", "avatar", evil)
+
+
+@pytest.mark.parametrize("evil", ["/etc/pass.png", "C:/evil.png"])
+def test_absolute_path_outside_approved_root_refused(tmp_path, evil):
+    """C1 v0.1.5: an absolute path is a valid shape; containment decides."""
+    with pytest.raises(PolicyDeniedError) as excinfo:
+        resolve_save_path(evil, tmp_path)
+    assert "POLICY_DENIED" in str(excinfo.value)
+    # The shape is accepted — the refusal is a containment decision, not a
+    # syntax one, so the agent may state an absolute output path.
+    assert validate_tool_args("p", "avatar", evil)["save_path"] == evil.replace(
+        "\\", "/"
+    )
 
 
 def test_golden_escape_example_rejected(tmp_path):

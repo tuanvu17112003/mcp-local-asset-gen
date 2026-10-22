@@ -367,6 +367,8 @@ def test_refine_creates_new_file_parent_untouched(tmp_path):
     )
     assert res == {
         "asset_path": "assets/parent_hat.png",
+        "asset_path_absolute": os.fspath(tmp_path / "assets" / "parent_hat.png"),
+        "asset_root": os.path.abspath(os.fspath(tmp_path)),
         "job_id": "ref-1",
         "parent_job_id": "parent-1",  # reverse-looked-up from stored generate
     }
@@ -434,10 +436,14 @@ def test_validate_refine_args_units():
             validate_refine_args(asset_path="a/b.png", instruction="x", strength=bad)
     with pytest.raises(PolicyDeniedError):
         validate_refine_args(asset_path="../../etc/pass.png", instruction="x")
-    with pytest.raises(PolicyDeniedError):
+    # C1 v0.1.5: an absolute save_path is a valid shape (containment is
+    # checked later by resolve_save_path), not a syntax error.
+    assert (
         validate_refine_args(
             asset_path="a/b.png", instruction="x", save_path="/abs/evil.png"
-        )
+        )["save_path"]
+        == "/abs/evil.png"
+    )
     with pytest.raises(ValueError, match="INVALID_JOB_ID"):
         validate_refine_args(asset_path="a/b.png", instruction="x", job_id="")
 
@@ -455,6 +461,8 @@ def test_server_info_shape(tmp_path, monkeypatch):
         "models": ["flux-schnell-gguf-q4", "flux-schnell-fp8"],
         "version": "0.1.0",
         "project_root": os.path.abspath(os.getcwd()),
+        "workspaces": {"default": os.path.abspath(os.getcwd())},
+        "allow_any_path": False,
         "reachable": True,
         "queue_depth": 0,
     }

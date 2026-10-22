@@ -196,4 +196,5 @@ def test_server_info_fixture_shape(monkeypatch, tmp_path):
     assert orch.server_info() == {
         **expected,
         "project_root": os.path.abspath(os.fspath(tmp_path)),
+        "workspaces": {"default": os.path.abspath(os.fspath(tmp_path))},
     }

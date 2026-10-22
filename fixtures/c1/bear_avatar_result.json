@@ -1,1 +1,1 @@
-{"asset_path": "assets/images/bear_avatar.png", "format": "png", "height": 512, "job_id": "example-job-id-1", "seed": 7, "style_preset": "flat", "width": 512}
+{"asset_path": "assets/images/bear_avatar.png", "asset_path_absolute": "C:/example/project/assets/images/bear_avatar.png", "asset_root": "C:/example/project", "format": "png", "height": 512, "job_id": "example-job-id-1", "seed": 7, "style_preset": "flat", "width": 512}

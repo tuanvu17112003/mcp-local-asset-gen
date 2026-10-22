@@ -1,4 +1,4 @@
-"""C1 orchestration: generate/refine flows over C2 + C3 (contract v0.1.0).
+"""C1 orchestration: generate/refine flows over C2 + C3 (contract v0.1.5).
 
 :class:`AssetOrchestrator` wires the frozen sibling interfaces with
 injectable deps so every path is testable with fakes (no network, no
@@ -22,6 +22,15 @@ when full) -> :func:`resolve_save_path` BEFORE any write -> backend
 submit -> fetch -> postprocess (sibling errors translated via
 :func:`translate_sibling_error`) -> write base + ``@2x``/``@3x`` files
 under the project jail -> record + return.
+
+C1 v0.1.5 (user request, 2026-10-22): the AGENT chooses the output
+path. A relative ``save_path`` still resolves under the selected
+workspace root; an ABSOLUTE ``save_path`` is honoured as given when it
+lands inside an approved root (the configured project root or a named
+workspace — see :meth:`AssetOrchestrator._approved_roots`). ``..``
+traversal stays refused everywhere, so containment can never be walked
+out of. Results carry ``asset_path_absolute`` so the caller always
+knows the exact file location.
 
 MVP notes: ``format`` is echoed metadata (PNG bytes; SVG vector output
 is deferred — C3 ``vectorize=True`` raises). Refine postprocessing uses
@@ -53,6 +62,10 @@ from .registry import JobRegistry
 from .validation import (
     CHECK_MODEL_LOADERS,
     KIND_TO_LOADERS,
+    _is_reserved_device_name,
+    _is_within,
+    _norm_key,
+    _real_key,
     derive_refined_save_path,
     resolve_save_path,
     validate_check_model_args,
@@ -97,6 +110,7 @@ _GENERATE_FIELDS = (
     "job_id",
     "icon_sizes",
     "ico",
+    "workspace",
 )
 
 _REFINE_FIELDS = (
@@ -106,6 +120,7 @@ _REFINE_FIELDS = (
     "save_path",
     "strength",
     "job_id",
+    "workspace",
 )
 
 
@@ -114,6 +129,15 @@ def _default_writer(path: Any, data: bytes) -> None:
     dest = Path(os.fspath(path))
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(bytes(data))
+
+
+def _root_list(roots: Any) -> list:
+    """Normalize a root argument (one path or an iterable of paths) to a list."""
+    if roots is None:
+        return []
+    if isinstance(roots, (str, bytes, os.PathLike)):
+        return [os.fspath(roots)]
+    return [os.fspath(root) for root in roots]
 
 
 class AssetOrchestrator:
@@ -212,7 +236,7 @@ class AssetOrchestrator:
     # -- shared flow pieces -------------------------------------------------
 
     def _write_files(
-        self, files: Any, target: Path, project_root: Any
+        self, files: Any, target: Path, allowed_roots: Any, allow_any_path: bool = False
     ) -> "Path":
         """Write postprocess ``files`` beside ``target``; return ``target``.
 
@@ -220,19 +244,20 @@ class AssetOrchestrator:
         ``output_dir / filename``. Non-leaf or jail-escaping names are
         refused with ``POLICY_DENIED`` (defense in depth: the stem came
         from a jailed path, but a hostile postprocess must not write
-        outside the root). An empty file list is ``POSTPROCESS_FAILED``.
-        Malformed entries (non-dict, missing ``filename``/``png_bytes``,
-        non-bytes ``png_bytes``, or insane ``width``/``height``/``scale``
-        when present) are ``POSTPROCESS_FAILED``. ``scale`` accepts the
-        ``@Nx`` integers (1/2/3, byte-identical), the C3 v0.1.1 icon
-        labels ``icon<N>`` (``N >= 1``, size derived from
-        ``width``/``height``), and ``"ico"`` for ``.ico`` entries.
+        outside the approved roots). An empty file list is
+        ``POSTPROCESS_FAILED``. Malformed entries (non-dict, missing
+        ``filename``/``png_bytes``, non-bytes ``png_bytes``, or insane
+        ``width``/``height``/``scale`` when present) are
+        ``POSTPROCESS_FAILED``. ``scale`` accepts the ``@Nx`` integers
+        (1/2/3, byte-identical), the C3 v0.1.1 icon labels ``icon<N>``
+        (``N >= 1``, size derived from ``width``/``height``), and
+        ``"ico"`` for ``.ico`` entries.
         """
         if not isinstance(files, (list, tuple)) or not files:
             raise PostprocessFailedError(
                 "POSTPROCESS_FAILED: postprocess returned no files"
             )
-        root_abs = os.path.abspath(os.fspath(project_root))
+        roots = [os.path.abspath(root) for root in _root_list(allowed_roots)]
         out_dir = target.parent
         for entry in files:
             if not isinstance(entry, dict):
@@ -252,10 +277,22 @@ class AssetOrchestrator:
                 or "/" in filename
                 or "\\" in filename
                 or filename in (".", "..")
+                or "\x00" in filename
             ):
                 raise PolicyDeniedError(
                     "POLICY_DENIED: postprocess filename must be a leaf, got %r"
                     % (filename,)
+                )
+            if _is_reserved_device_name(filename):
+                raise PolicyDeniedError(
+                    "POLICY_DENIED: postprocess filename must not name a "
+                    "reserved device, got %r" % (filename,)
+                )
+            if os.name == "nt" and ":" in filename:
+                # NTFS alternate data stream ("icon.png:evil") — not a file.
+                raise PolicyDeniedError(
+                    "POLICY_DENIED: postprocess filename must not contain ':' "
+                    "on Windows (alternate data stream), got %r" % (filename,)
                 )
             if "png_bytes" not in entry:
                 raise PostprocessFailedError(
@@ -300,20 +337,97 @@ class AssetOrchestrator:
             dest_abs = os.path.abspath(
                 os.path.join(os.fspath(out_dir), filename)
             )
-            if dest_abs == root_abs or os.path.commonpath([root_abs, dest_abs]) != root_abs:
+            if not allow_any_path and not any(
+                _is_within(_real_key(root), _real_key(dest_abs)) for root in roots
+            ):
                 raise PolicyDeniedError(
-                    "POLICY_DENIED: postprocess filename escapes project root, "
-                    "got %r" % (filename,)
+                    "POLICY_DENIED: postprocess filename escapes the approved "
+                    "roots, got %r" % (filename,)
                 )
-            self._writer(os.path.join(os.fspath(out_dir), filename), blob)
+            try:
+                self._writer(os.path.join(os.fspath(out_dir), filename), blob)
+            except (OSError, ValueError) as exc:
+                # Machine-readable code instead of a bare OSError/ValueError.
+                raise PostprocessFailedError(
+                    "POSTPROCESS_FAILED: writing %r failed: %s"
+                    % (filename, exc)
+                ) from exc
         return target
 
     @staticmethod
-    def _relative_posix(target: Path, project_root: Any) -> str:
-        root_abs = os.path.abspath(os.fspath(project_root))
-        return Path(os.path.relpath(os.fspath(target), root_abs)).as_posix()
+    def _owning_root(target: Path, allowed_roots: Any) -> Optional[str]:
+        """The FIRST approved root that contains ``target`` (absolute path).
+
+        The list is ordered: selected workspace root, default project root,
+        named workspaces. ``None`` when the target is outside every
+        approved root (only possible with ``--allow-any-path``).
+        """
+        target_key = _norm_key(os.path.abspath(os.fspath(target)))
+        for root in _root_list(allowed_roots):
+            if _is_within(_norm_key(root), target_key):
+                return os.path.abspath(root)
+        return None
+
+    @staticmethod
+    def _relative_posix(target: Path, allowed_roots: Any) -> str:
+        """POSIX path of ``target`` relative to the approved root owning it.
+
+        When the target sits outside every approved root (only possible
+        with ``--allow-any-path``), the absolute path is returned as-is so
+        the caller always learns the real location.
+        """
+        target_abs = os.path.abspath(os.fspath(target))
+        owner = AssetOrchestrator._owning_root(target, allowed_roots)
+        if owner is None:
+            return Path(target_abs).as_posix()
+        return Path(os.path.relpath(target_abs, owner)).as_posix()
 
     # -- public flows ----------------------------------------------------------
+
+    def _effective_root(self, project_root: Any, workspace: Any) -> str:
+        """Resolve the jail root for ``workspace`` within this call.
+
+        ``"default"``/``None`` return the passed ``project_root``
+        byte-identically; any other name resolves via
+        ``config.workspace_root``. A missing config or an unknown name
+        raises ``ValueError`` ``INVALID_WORKSPACE`` — always pre-backend.
+        """
+        if workspace is None or workspace == "default":
+            return project_root
+        if self._config is None:
+            raise ValueError(
+                "INVALID_WORKSPACE: unknown workspace %r (no named "
+                "workspaces configured; see server_info workspaces)"
+                % (workspace,)
+            )
+        return self._config.workspace_root(workspace)
+
+    def _approved_roots(self, project_root: Any, effective_root: Any) -> list:
+        """Every tree an absolute ``save_path`` may land in (C1 v0.1.5).
+
+        Order: the selected workspace root, the default project root, then
+        every named workspace. Duplicates are collapsed (case-folded on
+        Windows). The set is server-side and user-approved — the agent
+        picks a path inside it, never the set itself.
+        """
+        candidates = [effective_root, project_root]
+        if self._config is not None:
+            candidates.extend(self._config.project_roots.values())
+        roots: list = []
+        seen = set()
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            root = os.path.abspath(os.fspath(candidate))
+            key = _norm_key(root)
+            if key not in seen:
+                seen.add(key)
+                roots.append(root)
+        return roots
+
+    def _allow_any_path(self) -> bool:
+        """True when the server was started with ``--allow-any-path``."""
+        return bool(self._config is not None and self._config.allow_any_path)
 
     def generate(
         self,
@@ -330,6 +444,8 @@ class AssetOrchestrator:
         args = validate_tool_args(
             **{k: validated_args[k] for k in _GENERATE_FIELDS if k in validated_args}
         )
+        effective_root = self._effective_root(project_root, args.get("workspace"))
+        approved_roots = self._approved_roots(project_root, effective_root)
         if args["format"] == "svg":
             # Q4 defers SVG vector output (C3 ``vectorize=True`` raises and
             # never yields files): refuse loudly instead of echoing svg
@@ -345,7 +461,11 @@ class AssetOrchestrator:
         self._registry.register(jid)
         try:
             target = resolve_save_path(
-                args["save_path"], project_root, overwrite=args["overwrite"]
+                args["save_path"],
+                effective_root,
+                overwrite=args["overwrite"],
+                allowed_roots=approved_roots,
+                allow_any_path=self._allow_any_path(),
             )
             backend_job_id = self._submit_txt2img(
                 prompt=args["prompt"],
@@ -361,20 +481,36 @@ class AssetOrchestrator:
             if seed is None:  # neither caller nor backend supplied one (mirrors C2)
                 seed = random.randint(0, 0xFFFFFFFF)
             stem = Path(args["save_path"].replace("\\", "/")).stem
-            processed = self._postprocess(
-                bytes(fetched["png_bytes"]),
-                remove_bg=args["remove_bg"],
-                model="u2net",
-                trim=True,
-                sizes=(1, 2, 3),
-                stem=stem,
-                vectorize=False,
-                icon_sizes=args.get("icon_sizes"),
-                ico=args.get("ico", False),
+            try:
+                processed = self._postprocess(
+                    bytes(fetched["png_bytes"]),
+                    remove_bg=args["remove_bg"],
+                    model="u2net",
+                    trim=True,
+                    sizes=(1, 2, 3),
+                    stem=stem,
+                    vectorize=False,
+                    icon_sizes=args.get("icon_sizes"),
+                    ico=args.get("ico", False),
+                )
+            except (ValueError, OSError) as exc:
+                # A postprocess rejection must reach the agent with a
+                # machine-readable code, never as a bare ValueError/OSError
+                # (Pillow raises OSError subclasses for corrupt input).
+                raise PostprocessFailedError(
+                    "POSTPROCESS_FAILED: postprocess rejected the request: %s"
+                    % (exc,)
+                ) from exc
+            self._write_files(
+                processed["files"],
+                target,
+                approved_roots,
+                allow_any_path=self._allow_any_path(),
             )
-            self._write_files(processed["files"], target, project_root)
             result = {
-                "asset_path": self._relative_posix(target, project_root),
+                "asset_path": self._relative_posix(target, approved_roots),
+                "asset_path_absolute": os.fspath(target),
+                "asset_root": self._owning_root(target, approved_roots),
                 "width": args["width"],
                 "height": args["height"],
                 "format": args["format"],
@@ -412,10 +548,18 @@ class AssetOrchestrator:
         args = validate_refine_args(
             **{k: validated_args[k] for k in _REFINE_FIELDS if k in validated_args}
         )
-        parent_rel, parent_abs = self._resolve_parent(args, project_root)
+        effective_root = self._effective_root(project_root, args.get("workspace"))
+        approved_roots = self._approved_roots(project_root, effective_root)
+        parent_rel, parent_abs = self._resolve_parent(args, effective_root, approved_roots)
         save_path = args["save_path"]
         if save_path is None:  # asset_id-only call: derive from the stored parent
-            save_path = derive_refined_save_path(parent_rel)
+            # Derive from the parent's ABSOLUTE location, so the refined file
+            # lands NEXT TO its parent even when the parent lives in another
+            # approved root (a root-relative name would resolve under the
+            # selected workspace instead).
+            save_path = derive_refined_save_path(
+                Path(os.fspath(parent_abs)).as_posix()
+            )
         parent_job_id = (
             args["asset_id"]
             or self._registry.find_job_by_asset(parent_rel)
@@ -427,7 +571,13 @@ class AssetOrchestrator:
             return stored
         self._registry.register(jid)
         try:
-            target = resolve_save_path(save_path, project_root, overwrite=False)
+            target = resolve_save_path(
+                save_path,
+                effective_root,
+                overwrite=False,
+                allowed_roots=approved_roots,
+                allow_any_path=self._allow_any_path(),
+            )
             backend_job_id = self._submit_img2img(
                 input_png_path=os.fspath(parent_abs),
                 instruction=args["instruction"],
@@ -435,18 +585,31 @@ class AssetOrchestrator:
             )
             fetched = self._fetch_png_and_seed(backend_job_id)
             stem = Path(save_path.replace("\\", "/")).stem
-            processed = self._postprocess(
-                bytes(fetched["png_bytes"]),
-                remove_bg=False,
-                model="u2net",
-                trim=False,
-                sizes=(1, 2, 3),
-                stem=stem,
-                vectorize=False,
+            try:
+                processed = self._postprocess(
+                    bytes(fetched["png_bytes"]),
+                    remove_bg=False,
+                    model="u2net",
+                    trim=False,
+                    sizes=(1, 2, 3),
+                    stem=stem,
+                    vectorize=False,
+                )
+            except (ValueError, OSError) as exc:
+                raise PostprocessFailedError(
+                    "POSTPROCESS_FAILED: postprocess rejected the request: %s"
+                    % (exc,)
+                ) from exc
+            self._write_files(
+                processed["files"],
+                target,
+                approved_roots,
+                allow_any_path=self._allow_any_path(),
             )
-            self._write_files(processed["files"], target, project_root)
             result = {
-                "asset_path": self._relative_posix(target, project_root),
+                "asset_path": self._relative_posix(target, approved_roots),
+                "asset_path_absolute": os.fspath(target),
+                "asset_root": self._owning_root(target, approved_roots),
                 "job_id": jid,
                 "parent_job_id": parent_job_id,
             }
@@ -463,30 +626,45 @@ class AssetOrchestrator:
         return result
 
     def _resolve_parent(
-        self, args: Dict[str, Any], project_root: Any
+        self, args: Dict[str, Any], project_root: Any, approved_roots: Any = None
     ) -> Any:
         """Resolve the refine parent to ``(posix_rel, abs_path)`` inside the jail.
 
         ``asset_path`` inputs must exist (missing -> ``ValueError``);
         ``asset_id`` inputs resolve through the registry's stored results.
+        An absolute ``asset_path`` is honoured when it lands inside an
+        approved root (C1 v0.1.5).
         """
+        roots = list(approved_roots or []) + [project_root]
         if args["asset_path"] is not None:
             parent_abs = resolve_save_path(
-                args["asset_path"], project_root, overwrite=True
+                args["asset_path"],
+                project_root,
+                overwrite=True,
+                allowed_roots=roots,
+                allow_any_path=self._allow_any_path(),
             )
             if not parent_abs.is_file():
                 raise ValueError(
                     "INVALID_ASSET_PATH: no asset file at %r"
                     % (args["asset_path"],)
                 )
-            return self._relative_posix(parent_abs, project_root), parent_abs
+            return self._relative_posix(parent_abs, roots), parent_abs
         stored = self._registry.get(args["asset_id"])
         if not isinstance(stored, dict) or not stored.get("asset_path"):
             raise ValueError(
                 "INVALID_ASSET_REF: unknown asset_id %r" % (args["asset_id"],)
             )
+        # Prefer the absolute location: the stored relative path is relative
+        # to the root that owned it, which may not be the selected workspace
+        # (multi-root deployments) — re-resolving it there would miss.
+        parent_ref = stored.get("asset_path_absolute") or stored["asset_path"]
         parent_abs = resolve_save_path(
-            stored["asset_path"], project_root, overwrite=True
+            parent_ref,
+            project_root,
+            overwrite=True,
+            allowed_roots=roots,
+            allow_any_path=self._allow_any_path(),
         )
         if not parent_abs.is_file():
             raise ValueError(
@@ -503,15 +681,21 @@ class AssetOrchestrator:
         ``queue_depth`` (``0`` fallback when the JSON is ok but carries no
         recognizable count). ANY exception (URLError/OSError/timeout/
         HTTPError/bad JSON) means ``reachable False``, ``queue_depth None``
-        — never raises.
+        — never raises. ``allow_any_path`` reports whether the server was
+        started with ``--allow-any-path`` (absolute paths outside every
+        approved root are then accepted).
         """
         cfg = self._config
         url = cfg.comfyui_url if cfg is not None else DEFAULT_COMFYUI_URL
         version = cfg.version if cfg is not None else SERVER_VERSION
+        allow_any_path = bool(cfg is not None and cfg.allow_any_path)
         if cfg is not None:
             project_root = os.path.abspath(os.fspath(cfg.project_root))
+            workspaces = {"default": project_root}
+            workspaces.update(cfg.project_roots)
         else:
             project_root = os.path.abspath(os.getcwd())
+            workspaces = {"default": project_root}
         reachable, queue_depth = _probe_comfyui_queue(url)
         return {
             "backend": "comfyui",
@@ -519,6 +703,8 @@ class AssetOrchestrator:
             "models": list(SERVER_MODELS),
             "version": version,
             "project_root": project_root,
+            "workspaces": workspaces,
+            "allow_any_path": allow_any_path,
             "reachable": reachable,
             "queue_depth": queue_depth,
         }

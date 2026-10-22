@@ -7,8 +7,63 @@ Copy the relevant entry into the GitHub Release notes when tagging.
 
 ## [Unreleased]
 
-_Add the next batch here. Keep entries user-facing; link contracts where
-behavior is pinned._
+### Added
+- **The agent chooses the output path** (C1 v0.1.5, user request
+  2026-10-22): `save_path` may now be absolute. An absolute path is used
+  exactly as given — the asset lands at that path — as long as it lands
+  inside an approved root (the project root plus any named workspace).
+  Relative paths behave exactly as before (resolved under the selected
+  workspace root). Windows `\` separators are folded to `/`.
+- New server flag `--allow-any-path`: lifts every containment check for
+  absolute paths (default OFF, reported as `server_info.allow_any_path`).
+- New result fields: `asset_path_absolute` (exact file location) and
+  `asset_root` (the approved root owning `asset_path`) on
+  `generate_app_asset` / `refine_asset`, and `allow_any_path` on
+  `server_info`.
+
+### Changed
+- The jail follows the client: with no `--project-root`, the server uses
+  its launch directory (the client's workspace for a client that starts the
+  server in the project) instead of the MCP server's own checkout.
+  Recommended OpenCode wiring is now the `asset-gen.py` launcher with no
+  pinned `cwd`.
+- `POLICY_DENIED` for an absolute path outside the approved roots now
+  names the approved roots and the two ways to widen them
+  (`--workspace name=path`, `--allow-any-path`).
+- Containment is now decided on the **resolved** path: a link inside an
+  approved root that points outside it is refused instead of writing
+  outside the root.
+- Refused save paths: NUL bytes, Windows reserved device names (`NUL`,
+  `COM1`, …) and NTFS alternate-data-stream forms (`icon.png:evil`).
+  A failing write is reported as `POSTPROCESS_FAILED` instead of a bare
+  `OSError`.
+- **The requested leaf is the written file** (C1 v0.1.6): the leaf must be
+  `<stem>.png` with a PNG-safe stem (`[A-Za-z0-9._-]`, at least one letter
+  or digit) and a lowercase extension. `icon.webp`, `icon.PNG` or
+  `mon icône.png` are refused pre-backend with
+  `POLICY_DENIED INVALID_SAVE_PATH` instead of silently writing `icon.png`
+  and reporting the requested name — the tool no longer returns a path that
+  does not exist.
+- `refine_asset` with an `asset_id` now resolves the stored absolute
+  location, so refining an asset that lives in another approved root works
+  instead of failing with "parent missing"; the refined file is written
+  next to its parent, in that same root.
+
+### Fixed
+- Published wiring docs corrected (`README.md` OpenCode snippet and test
+  count, `src/mcp_server/opencode_wiring.md`, `asset-gen.py` docstring):
+  they no longer teach the pattern that pinned the asset jail to the MCP
+  server's own checkout.
+- The agent guide and the setup guide now state the leaf rule, the
+  refused path forms, and a "verify the jail root" step (the failure mode
+  when a client launches the server outside the project).
+
+### Verified
+- 339 passed + 3 env-conditional skips + 11 subtests (venv, Python 3.13).
+- Live MCP stdio end-to-end with the configured launcher argv from a
+  foreign working directory: `project_root` follows the client, an absolute
+  `save_path` lands exactly there, a relative one lands under the root,
+  and an absolute path outside the roots is refused with nothing written.
 
 ## [v0.1.1] — 2026-10-21 (tag: `v0.1.1`)
 

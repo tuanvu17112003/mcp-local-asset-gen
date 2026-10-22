@@ -1,4 +1,4 @@
-"""FastMCP server entrypoint (contract ``C1-mcp-asset-tool`` v0.1.0).
+"""FastMCP server entrypoint (contract ``C1-mcp-asset-tool`` v0.1.5).
 
 ``fastmcp`` is an OPTIONAL runtime dependency: it is imported lazily
 inside :func:`create_server` only, so this module (and the whole
@@ -58,25 +58,50 @@ ComfyUI + rembg pipeline and save them into the project. No cloud, no uploads.
 Tools — call exactly these, with these shapes:
 - generate_app_asset({prompt*, category*, save_path*, width=512,
   height=512, format="png", remove_bg=null, style_preset="flat", seed=null,
-  overwrite=false, job_id=null, icon_sizes=null, ico=false}): text-to-image,
+  overwrite=false, job_id=null, icon_sizes=null, ico=false,
+  workspace="default"}): text-to-image,
   then transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
   true for icon/avatar. icon_sizes e.g. [32,64] adds -32px/-64px renders;
   ico:true adds a multi-size .ico. format:"svg" is REFUSED (deferred).
+  workspace:"name" (default "default") selects a NAMED server-side root
+  from server_info.workspaces. Unknown name → INVALID_WORKSPACE.
 - refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
-  job_id=null}): image-to-image tweak; writes a NEW file, never mutates the
+  job_id=null, workspace="default"}): image-to-image tweak; writes a NEW file, never mutates the
   parent (default save is <stem>_refined.png). strength is (0,1].
 - check_model({name*, kind}): is a weight file present in a ComfyUI loader?
   kind in unet|clip|vae|checkpoint (default: all). Use before generating
   with an unusual model.
 - server_info({}): {backend, comfyui_url, models, version, project_root,
-  reachable, queue_depth}. Call FIRST: if reachable=false, do not call generate.
+  workspaces, allow_any_path, reachable, queue_depth}. Call FIRST: if
+  reachable=false, do not call generate.
 
 Workflow: server_info → (check_model for non-default weights) →
 generate_app_asset → embed the returned asset_path in code → refine_asset
 to iterate (pass seed to reproduce a generation).
 
-Rules: save_path must stay inside the project root (no `..`, no absolute
-escapes, no overwrite without overwrite:true). Refine parents must exist;
+Rules: YOU choose the output path.
+- save_path may be ABSOLUTE ("C:/proj/src/assets/icon.png") or relative
+  ("assets/icons/icon.png"). An absolute path is used exactly as given; a
+  relative one is resolved under the selected workspace root.
+- The leaf must be a lowercase .png file with a safe stem
+  ([A-Za-z0-9._-]): the server writes PNG assets, so "icon.webp" or
+  "mon icône.png" is refused pre-backend (POLICY_DENIED INVALID_SAVE_PATH).
+- An absolute path must land inside an approved root (the server's
+  project_root or a named workspace — see server_info.workspaces).
+  Containment is checked on the RESOLVED path, so a link pointing outside
+  the root is refused too. Windows backslashes are accepted; ".."
+  traversal, NUL bytes, ':' (NTFS streams) and reserved device names
+  (NUL, COM1, …) are not. --allow-any-path removes every containment
+  check (opt-in, default off).
+- The default project_root is the server's start directory (your
+  workspace) unless configured otherwise — compare once via server_info.
+  If your target tree is not an approved root, the human must add it
+  (--workspace name=path); you cannot widen the set per call.
+- The result carries asset_path (relative to asset_root), asset_path_absolute
+  (exact location) and asset_root (the approved root owning the file).
+- workspace selects a named server-side root from server_info.workspaces
+  (default "default").
+Existing files need overwrite:true. Refine parents must exist;
 for LIVE img2img the parent basename must pre-exist in ComfyUI's input dir.
 At most 2 concurrent jobs (excess → QUEUED with job_id; reuse job_id for
 idempotent retry).
@@ -86,13 +111,12 @@ BACKEND_UNAVAILABLE (ComfyUI down — verify url/port via server_info);
 GENERATION_FAILED (covers JOB_FAILED/JOB_TIMEOUT payloads); POLICY_DENIED
 (bad path/overwrite — fix args); INVALID_* (bad args — rejected
 pre-backend); POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
-postprocess-internal opt-in, no tool param — use the default model).
+postprocess-internal opt-in — use the default model).
 
 Limits: localhost ComfyUI only (allow_remote opt-in exists; default stays
 local); 512px default, backend schnell 1–4 steps (fixed, no steps param);
 generation is stochastic; postprocess trims/pads and center-crops icons.
-Unit tests mock down-backend paths; the live server probes via server_info
-GET /prompt only.
+Unit tests mock down-backend paths; the live server probes GET /prompt only.
 """
 
 
@@ -243,6 +267,7 @@ def create_server(
         job_id: Optional[str] = None,
         icon_sizes: Optional[Any] = None,
         ico: bool = False,
+        workspace: str = "default",
     ) -> Dict[str, Any]:
         """Generate an app asset with local ComfyUI + postprocessing."""
         from .validation import validate_tool_args
@@ -262,6 +287,7 @@ def create_server(
                 job_id=job_id,
                 icon_sizes=icon_sizes,
                 ico=ico,
+                workspace=workspace,
             )
             return orchestrator.generate(args, project_root)
         except McpServerError as exc:
@@ -275,6 +301,7 @@ def create_server(
         save_path: Optional[str] = None,
         strength: float = 0.6,
         job_id: Optional[str] = None,
+        workspace: str = "default",
     ) -> Dict[str, Any]:
         """Refine an existing asset; creates a new file, never mutates."""
         from .validation import validate_refine_args
@@ -287,6 +314,7 @@ def create_server(
                 save_path=save_path,
                 strength=strength,
                 job_id=job_id,
+                workspace=workspace,
             )
             return orchestrator.refine(args, project_root)
         except McpServerError as exc:
@@ -326,7 +354,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--project-root",
         default=os.getcwd(),
-        help="Asset jail root every save_path must stay inside (default: cwd).",
+        help=(
+            "Asset jail root every save_path must stay inside "
+            "(default: the server's launch directory, i.e. the client's "
+            "workspace)."
+        ),
+    )
+    parser.add_argument(
+        "--workspace",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Named extra asset jail root (repeatable: --workspace name=path).",
+    )
+    parser.add_argument(
+        "--allow-any-path",
+        action="store_true",
+        help=(
+            "Allow an absolute save_path OUTSIDE every approved root "
+            "(default off: absolute paths must stay inside project_root or "
+            "a named workspace)."
+        ),
     )
     parser.add_argument(
         "--comfyui-url",
@@ -339,6 +387,44 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Opt in to a non-loopback --comfyui-url.",
     )
     return parser
+
+
+def _parse_workspace_args(entries: Optional[Any]) -> Dict[str, str]:
+    """Parse repeatable ``--workspace NAME=PATH`` values into a dict.
+
+    Raises ``ValueError`` ``INVALID_PROJECT_ROOT`` on bad shape (missing
+    ``=``, empty name, empty path, duplicate name, reserved ``default``);
+    directory existence is enforced by :class:`ServerConfig`.
+    """
+    parsed: Dict[str, str] = {}
+    for entry in entries or []:
+        if not isinstance(entry, str) or "=" not in entry:
+            raise ValueError(
+                "INVALID_PROJECT_ROOT: --workspace must be NAME=PATH, got %r"
+                % (entry,)
+            )
+        name, _, path = entry.partition("=")
+        if not name:
+            raise ValueError(
+                "INVALID_PROJECT_ROOT: --workspace name must be non-empty, "
+                "got %r" % (entry,)
+            )
+        if name == "default":
+            raise ValueError(
+                "INVALID_PROJECT_ROOT: workspace name 'default' is reserved "
+                "(it maps to --project-root)"
+            )
+        if not path:
+            raise ValueError(
+                "INVALID_PROJECT_ROOT: --workspace %r path must be non-empty"
+                % (name,)
+            )
+        if name in parsed:
+            raise ValueError(
+                "INVALID_PROJECT_ROOT: duplicate --workspace name %r" % (name,)
+            )
+        parsed[name] = path
+    return parsed
 
 
 def main(argv: Optional[Any] = None) -> int:
@@ -355,7 +441,8 @@ def main(argv: Optional[Any] = None) -> int:
     if not explicit_root:
         log.warning(
             "asset-gen: --project-root not given; falling back to cwd %r as "
-            "the asset jail — pass an explicit --project-root for a stable root.",
+            "the asset jail (normally the client's workspace) — pass an "
+            "explicit --project-root <dir> to pin a different root.",
             os.getcwd(),
         )
     args = build_arg_parser().parse_args(argv)
@@ -363,6 +450,8 @@ def main(argv: Optional[Any] = None) -> int:
         project_root=args.project_root,
         comfyui_url=args.comfyui_url,
         allow_remote=args.allow_remote,
+        project_roots=_parse_workspace_args(args.workspace),
+        allow_any_path=args.allow_any_path,
     )
     mcp = create_server(
         config,

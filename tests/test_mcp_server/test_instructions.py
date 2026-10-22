@@ -23,6 +23,8 @@ REQUIRED_SNIPPETS = (
     "overwrite",
     "reachable",
     "queue_depth",
+    "project_root",
+    "workspace",
     "icon_sizes",
     "strength",
     "job_id",
@@ -32,6 +34,12 @@ REQUIRED_SNIPPETS = (
     "POLICY_DENIED",
     "INVALID_",
     "LICENSE_REQUIRED",
+    # C1 v0.1.5 — the agent chooses the output path.
+    "ABSOLUTE",
+    "approved root",
+    "asset_path_absolute",
+    "allow_any_path",
+    "workspace root",
 )
 
 

@@ -1,15 +1,22 @@
-"""Argument validation and project-root jail (C1 v0.1.0).
+"""Argument validation and project-root jail (C1 v0.1.5).
 
 Two layers:
 
 * :func:`validate_tool_args` — pure string/shape validation for
-  ``generate_app_asset`` params. Path *shape* problems (absolute, ``..``,
-  backslash) raise :class:`PolicyDeniedError`; param problems raise
-  ``ValueError`` with an ``INVALID_*`` message. Filesystem containment and
-  the overwrite check need ``project_root`` and live in ...
-* :func:`resolve_save_path` — ... which joins the path under
-  ``project_root``, verifies containment via absolute-path comparison, and
-  refuses existing files unless ``overwrite=True``.
+  ``generate_app_asset`` params. Path *shape* problems (empty, ``..``,
+  trailing separator, drive-relative) raise :class:`PolicyDeniedError`;
+  param problems raise ``ValueError`` with an ``INVALID_*`` message.
+  Filesystem containment and the overwrite check need ``project_root`` and
+  live in ...
+* :func:`resolve_save_path` — ... which resolves the path (relative under
+  ``project_root``; absolute as given), verifies containment against the
+  approved roots, and refuses existing files unless ``overwrite=True``.
+
+C1 v0.1.5 (user request, 2026-10-22): the AGENT chooses the output path.
+An absolute ``save_path`` is accepted when it lands inside an approved root
+(the configured project root or a named workspace); relative paths keep
+resolving under the selected workspace root. ``..`` traversal is refused in
+every form, so containment can never be walked out of.
 
 ``validate_tool_args`` intentionally does not touch the filesystem, so the
 golden-shape check stays hermetic; ``resolve_save_path`` is the enforcing
@@ -22,7 +29,7 @@ import os
 import posixpath
 import re
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .errors import PolicyDeniedError
 
@@ -57,76 +64,263 @@ REMOVE_BG_DEFAULT_TRUE = frozenset({"icon", "avatar"})
 
 _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
 
+#: Absolute Windows drive path after separator normalization (``C:/x``).
+_DRIVE_ABS_RE = re.compile(r"^[A-Za-z]:/")
 
-def _check_path_shape(save_path: Any) -> str:
-    """String-level jail pre-check; returns the path or raises PolicyDeniedError."""
+
+def _normalize_separators(save_path: str) -> str:
+    """Fold Windows separators into POSIX ones (``\\`` -> ``/``).
+
+    ``C:\\proj\\assets\\icon.png`` and ``C:/proj/assets/icon.png`` are the
+    same path, so the agent may use whichever form it produces.
+    """
+    return save_path.replace("\\", "/")
+
+
+def _norm_key(path: Any) -> str:
+    """Case-normalized absolute key used for containment comparisons."""
+    return os.path.normcase(os.path.abspath(os.fspath(path)))
+
+
+def _real_key(path: Any) -> str:
+    """Case-normalized key of the REAL path (symlinks/junctions resolved).
+
+    Containment is decided on these keys, not on the lexical ones: a
+    link inside an approved root that points outside it must not become a
+    write outside that root.
+    """
+    return os.path.normcase(os.path.realpath(os.fspath(path)))
+
+
+#: Windows reserved device names — ``NUL.png`` still resolves to the null
+#: device, so these are refused by name (never a real asset file).
+_WINDOWS_DEVICE_NAMES = frozenset(
+    ["nul", "con", "prn", "aux"]
+    + ["com%d" % i for i in range(1, 10)]
+    + ["lpt%d" % i for i in range(1, 10)]
+)
+
+#: File-name stem charset accepted by the PNG writer (mirrors
+#: :func:`src.postprocess.export.scale_filename`). The server writes PNG
+#: bytes only, so the requested leaf must be ``<stem>.png`` — otherwise the
+#: written file and the reported path would differ.
+_PNG_SAFE_STEM_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _is_reserved_device_name(name: str) -> bool:
+    """True for a Windows device name (``NUL``, ``COM1``, ... with any suffix)."""
+    if os.name != "nt":
+        return False
+    stem = name.split(".", 1)[0].strip().lower()
+    return stem in _WINDOWS_DEVICE_NAMES
+
+
+def _is_within(root_key: str, candidate_key: str) -> bool:
+    """True when ``candidate_key`` is strictly inside ``root_key``.
+
+    Both arguments are :func:`_norm_key` values (absolute, case-folded on
+    Windows). A candidate equal to the root is NOT inside it — a save path
+    must name a file, never the root itself.
+    """
+    if candidate_key == root_key:
+        return False
+    prefix = root_key if root_key.endswith(os.sep) else root_key + os.sep
+    return candidate_key.startswith(prefix)
+
+
+def _split_save_path(save_path: Any) -> Tuple[bool, str]:
+    """Validate the shape of ``save_path``; return ``(is_absolute, normalized)``.
+
+    Windows separators are folded to ``/``. Absolute paths (POSIX ``/x``,
+    Windows ``C:/x``, UNC ``//host/x``) are ACCEPTED here — the agent may
+    name the exact output location; containment against the approved roots
+    is enforced later by :func:`resolve_save_path`.
+
+    Refused in every form: empty/non-string values, ``..`` traversal, a
+    trailing separator, drive-relative paths (``C:foo``), and paths that do
+    not name a file.
+    """
     if not isinstance(save_path, str) or not save_path:
         raise PolicyDeniedError(
             "POLICY_DENIED INVALID_SAVE_PATH: save_path must be a non-empty "
-            "relative POSIX path, got %r" % (save_path,)
+            "path string, got %r" % (save_path,)
         )
-    if "\\" in save_path:
+    if "\x00" in save_path:
         raise PolicyDeniedError(
-            "POLICY_DENIED INVALID_SAVE_PATH: backslashes are not POSIX "
-            "separators (possible '..\\' escape), got %r" % (save_path,)
+            "POLICY_DENIED INVALID_SAVE_PATH: save_path must not contain NUL "
+            "bytes, got %r" % (save_path,)
         )
-    if (
-        save_path.startswith("/")
-        or _DRIVE_LETTER_RE.match(save_path)
-        or save_path.startswith("\\\\")
-        or os.path.isabs(save_path)
-    ):
+    normalized = _normalize_separators(save_path)
+    if not normalized.strip():
         raise PolicyDeniedError(
-            "POLICY_DENIED: absolute save_path escapes project root, got %r"
-            % (save_path,)
+            "POLICY_DENIED INVALID_SAVE_PATH: save_path must be a non-empty "
+            "path string, got %r" % (save_path,)
         )
-    parts = save_path.split("/")
-    if ".." in parts:
+    if ".." in normalized.split("/"):
         raise PolicyDeniedError(
-            "POLICY_DENIED: '..' traversal escapes project root, got %r" % (save_path,)
+            "POLICY_DENIED: '..' traversal is never accepted in save_path, "
+            "got %r" % (save_path,)
         )
-    normed = posixpath.normpath(save_path)
-    if normed == ".." or normed.startswith("../"):
+    if _DRIVE_LETTER_RE.match(normalized) and not _DRIVE_ABS_RE.match(normalized):
         raise PolicyDeniedError(
-            "POLICY_DENIED: normalized save_path escapes project root, got %r"
-            % (save_path,)
+            "POLICY_DENIED INVALID_SAVE_PATH: drive-relative paths are not "
+            "accepted (use an absolute path with a separator after the drive "
+            "letter), got %r" % (save_path,)
         )
-    if normed in (".", "") or save_path.endswith("/"):
+    if normalized.endswith("/"):
         raise PolicyDeniedError(
             "POLICY_DENIED INVALID_SAVE_PATH: save_path must name a file, got %r"
             % (save_path,)
         )
-    return save_path
+    tail = normalized.rsplit("/", 1)[-1]
+    if not tail or tail == ".":
+        raise PolicyDeniedError(
+            "POLICY_DENIED INVALID_SAVE_PATH: save_path must name a file, got %r"
+            % (save_path,)
+        )
+    if _is_reserved_device_name(tail):
+        raise PolicyDeniedError(
+            "POLICY_DENIED INVALID_SAVE_PATH: save_path must not name a "
+            "reserved device, got %r" % (save_path,)
+        )
+    if os.name == "nt":
+        # A ':' inside a component is an NTFS alternate data stream
+        # ("icon.png:evil"): the write would bypass the overwrite guard and
+        # the reported path would not exist as a file. Refused on Windows;
+        # POSIX allows ':' in file names, so it stays legal there.
+        _parts = normalized.split("/")
+        _checked = _parts[1:] if _DRIVE_ABS_RE.match(normalized) else _parts
+        if any(":" in part for part in _checked):
+            raise PolicyDeniedError(
+                "POLICY_DENIED INVALID_SAVE_PATH: ':' is not allowed inside a "
+                "path component on Windows (alternate data stream), got %r"
+                % (save_path,)
+            )
+    _check_asset_leaf(tail, save_path)
+    is_absolute = normalized.startswith("/") or bool(_DRIVE_ABS_RE.match(normalized))
+    return is_absolute, normalized
 
 
-def resolve_save_path(save_path: str, project_root: Any, overwrite: bool = False) -> Path:
-    """Jail ``save_path`` under ``project_root`` and return the absolute Path.
+def _check_asset_leaf(tail: str, save_path: Any) -> None:
+    """Refuse a leaf the server cannot write under the requested name.
 
-    Rejects absolute paths, ``..`` traversal (including ``a/../../b.png``),
-    and non-file targets with :class:`PolicyDeniedError` (``POLICY_DENIED``).
-    Refuses to clobber an existing file unless ``overwrite`` is ``True``
-    (also ``POLICY_DENIED`` — the contract invariant "never overwrite
-    without explicit ``overwrite:true``").
+    The pipeline writes PNG bytes named ``<stem>.png`` (plus ``@2x``/``@3x``
+    siblings), so the requested leaf must BE ``<stem>.png`` with a
+    PNG-safe stem — otherwise the written file and the path the tool
+    reports would differ. Refused pre-backend, with a machine-readable
+    code.
     """
-    _check_path_shape(save_path)
+    stem, dot, ext = tail.rpartition(".")
+    if not dot or ext != "png":
+        raise PolicyDeniedError(
+            "POLICY_DENIED INVALID_SAVE_PATH: save_path must name a .png file "
+            "(lowercase; the server writes PNG assets), got %r" % (save_path,)
+        )
+    if (
+        not stem
+        or ".." in stem
+        or _PNG_SAFE_STEM_RE.fullmatch(stem) is None
+        or not any(char.isalnum() for char in stem)
+    ):
+        raise PolicyDeniedError(
+            "POLICY_DENIED INVALID_SAVE_PATH: save_path file name must be "
+            "<stem>.png with a stem of [A-Za-z0-9._-] containing at least one "
+            "letter or digit, got %r" % (save_path,)
+        )
+
+
+def _check_path_shape(save_path: Any) -> str:
+    """Shape check for ``save_path``; returns the normalized path.
+
+    Absolute paths pass the shape check (C1 v0.1.5) — they are contained
+    later against the approved roots by :func:`resolve_save_path`.
+    """
+    _is_absolute, normalized = _split_save_path(save_path)
+    return normalized
+
+
+def resolve_save_path(
+    save_path: str,
+    project_root: Any,
+    overwrite: bool = False,
+    allowed_roots: Optional[Iterable[Any]] = None,
+    allow_any_path: bool = False,
+) -> Path:
+    """Resolve ``save_path`` to an absolute :class:`Path` inside an approved root.
+
+    * A **relative** path resolves under ``project_root`` (the selected
+      workspace root) — unchanged C1 v0.1.4 behavior.
+    * An **absolute** path is honoured as given (the agent chooses the exact
+      output location) but must land inside one of ``allowed_roots``
+      (default: ``project_root`` alone). ``allow_any_path=True`` lifts that
+      containment check — it is an explicit server-side opt-in
+      (``--allow-any-path``), never a per-call decision.
+
+    Refused in every form: absolute paths outside the approved roots, ``..``
+    traversal, paths that do not name a file, and clobbering an existing
+    file unless ``overwrite`` is ``True`` (all ``POLICY_DENIED``).
+    """
+    is_absolute, normalized = _split_save_path(save_path)
     if not isinstance(overwrite, bool):
         raise PolicyDeniedError(
             "POLICY_DENIED INVALID_OVERWRITE: overwrite must be a bool, got %r"
             % (overwrite,)
         )
-    normed = posixpath.normpath(save_path)
-    root_abs = os.path.abspath(os.fspath(project_root))
-    candidate_abs = os.path.abspath(os.path.join(root_abs, *normed.split("/")))
-    if candidate_abs == root_abs or os.path.commonpath([root_abs, candidate_abs]) != root_abs:
-        raise PolicyDeniedError(
-            "POLICY_DENIED: save_path escapes project root, got %r" % (save_path,)
+    root_real = os.path.abspath(os.fspath(project_root))
+    roots_real: List[str] = []
+    roots_lex: List[str] = []
+    roots_shown: List[str] = []
+    for candidate in list(allowed_roots or []) + [project_root]:
+        shown = os.path.abspath(os.fspath(candidate))
+        lex = _norm_key(candidate)
+        real = _real_key(candidate)
+        if real not in roots_real:
+            roots_real.append(real)
+            roots_lex.append(lex)
+            roots_shown.append(shown)
+    if is_absolute:
+        target_abs = os.path.abspath(normalized)
+        if not allow_any_path and not any(
+            _is_within(root, _real_key(target_abs)) for root in roots_real
+        ):
+            lex_inside = any(
+                _is_within(root, _norm_key(target_abs)) for root in roots_lex
+            )
+            if lex_inside:
+                raise PolicyDeniedError(
+                    "POLICY_DENIED: absolute save_path %r is inside an approved "
+                    "root but RESOLVES outside it (a link points outside); ask "
+                    "the human to point the save path at a real directory, to "
+                    "add that tree as a workspace (--workspace name=path), or "
+                    "to start the server with --allow-any-path"
+                    % (save_path,)
+                )
+            raise PolicyDeniedError(
+                "POLICY_DENIED: absolute save_path %r is outside every approved "
+                "root (%s); ask the human to add that tree as a workspace "
+                "(--workspace name=path) or to start the server with "
+                "--allow-any-path" % (save_path, ", ".join(roots_shown))
+            )
+    else:
+        target_abs = os.path.abspath(
+            os.path.join(root_real, *posixpath.normpath(normalized).split("/"))
         )
-    if os.path.exists(candidate_abs) and not overwrite:
+        if not _is_within(_real_key(root_real), _real_key(target_abs)):
+            if _is_within(_norm_key(root_real), _norm_key(target_abs)):
+                raise PolicyDeniedError(
+                    "POLICY_DENIED: save_path %r is inside the project root but "
+                    "RESOLVES outside it (a link points outside); use a real "
+                    "directory inside the root" % (save_path,)
+                )
+            raise PolicyDeniedError(
+                "POLICY_DENIED: save_path escapes project root, got %r" % (save_path,)
+            )
+    if os.path.exists(target_abs) and not overwrite:
         raise PolicyDeniedError(
             "POLICY_DENIED INVALID_OVERWRITE: file exists and overwrite is not "
             "set, got %r" % (save_path,)
         )
-    return Path(candidate_abs)
+    return Path(target_abs)
 
 
 def _require_int(name: str, value: Any, *, minimum: int, code: str) -> int:
@@ -151,12 +345,19 @@ def validate_tool_args(
     job_id: Any = None,
     icon_sizes: Any = None,
     ico: Any = False,
+    workspace: Any = "default",
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
     Applies C1 defaults: ``width``/``height`` 512, ``format`` ``"png"``,
-    ``style_preset`` ``"flat"``, and ``remove_bg`` defaulting to ``True``
-    for ``icon``/``avatar`` else ``False``. Path-shape violations raise
+    ``style_preset`` ``"flat"``, ``workspace`` ``"default"`` (a named
+    server-side root; unknown names fail downstream with
+    ``INVALID_WORKSPACE``), and ``remove_bg`` defaulting to ``True`` for
+    ``icon``/``avatar`` else ``False``. ``save_path`` may be relative
+    (resolved under the selected workspace root) or absolute (honoured as
+    given when it lands inside an approved root — C1 v0.1.5); Windows
+    separators are normalized to ``/``.
+    Path-shape violations raise
     :class:`PolicyDeniedError`; all other param violations raise
     ``ValueError`` with an ``INVALID_*`` message.
     """
@@ -166,7 +367,7 @@ def validate_tool_args(
         raise ValueError(
             "INVALID_CATEGORY: must be one of %s, got %r" % (sorted(CATEGORIES), category)
         )
-    _check_path_shape(save_path)
+    save_path = _check_path_shape(save_path)
     width = _require_int("width", width, minimum=1, code="INVALID_WIDTH")
     height = _require_int("height", height, minimum=1, code="INVALID_HEIGHT")
     if format not in FORMATS:
@@ -219,6 +420,11 @@ def validate_tool_args(
         ico = False
     if not isinstance(ico, bool):
         raise ValueError("INVALID_ICO: ico must be a bool, got %r" % (ico,))
+    if not isinstance(workspace, str) or not workspace:
+        raise ValueError(
+            "INVALID_WORKSPACE: workspace must be a non-empty string, got %r"
+            % (workspace,)
+        )
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -234,6 +440,7 @@ def validate_tool_args(
         "job_id": job_id,
         "icon_sizes": icon_sizes_norm,
         "ico": ico,
+        "workspace": workspace,
     }
     return validated
 
@@ -305,6 +512,7 @@ def validate_refine_args(
     save_path: Any = None,
     strength: Any = DEFAULT_REFINE_STRENGTH,
     job_id: Any = None,
+    workspace: Any = "default",
 ) -> Dict[str, Any]:
     """Validate ``refine_asset`` params; return a normalized args dict.
 
@@ -314,7 +522,12 @@ def validate_refine_args(
     (:func:`derive_refined_save_path`) when ``asset_path`` is given and
     stays ``None`` for id-only calls (the orchestrator derives it from
     the stored parent path). ``strength`` must satisfy ``0 < s <= 1``
-    (default 0.6). Path-shape violations raise :class:`PolicyDeniedError`;
+    (default 0.6). ``workspace`` selects a named server-side root
+    (default ``"default"``; unknown names fail downstream with
+    ``INVALID_WORKSPACE``). ``asset_path``/``save_path`` may be relative
+    (resolved under the selected workspace root) or absolute (honoured as
+    given when it lands inside an approved root — C1 v0.1.5).
+    Path-shape violations raise :class:`PolicyDeniedError`;
     all other param violations raise ``ValueError`` with an ``INVALID_*``
     message.
     """
@@ -328,13 +541,13 @@ def validate_refine_args(
             "got %r" % (asset_id,)
         )
     if asset_path is not None:
-        _check_path_shape(asset_path)
+        asset_path = _check_path_shape(asset_path)
     if not isinstance(instruction, str) or not instruction.strip():
         raise ValueError("INVALID_INSTRUCTION: instruction must be a non-empty string")
     if save_path is None and asset_path is not None:
         save_path = derive_refined_save_path(asset_path)
     if save_path is not None:
-        _check_path_shape(save_path)
+        save_path = _check_path_shape(save_path)
     if isinstance(strength, bool) or not isinstance(strength, (int, float)):
         raise ValueError(
             "INVALID_STRENGTH: strength must be a number in (0, 1], got %r"
@@ -346,6 +559,11 @@ def validate_refine_args(
         )
     if job_id is not None and (not isinstance(job_id, str) or not job_id):
         raise ValueError("INVALID_JOB_ID: job_id must be a non-empty string when given")
+    if not isinstance(workspace, str) or not workspace:
+        raise ValueError(
+            "INVALID_WORKSPACE: workspace must be a non-empty string, got %r"
+            % (workspace,)
+        )
 
     return {
         "asset_id": asset_id,
@@ -354,4 +572,5 @@ def validate_refine_args(
         "save_path": save_path,
         "strength": float(strength),
         "job_id": job_id,
+        "workspace": workspace,
     }

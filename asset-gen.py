@@ -1,8 +1,13 @@
 """Foreign-cwd launcher for the asset-gen MCP server.
 
-Run as ``<python> <root>/asset-gen.py --project-root <root>`` from any
-working directory; no PYTHONPATH setup needed. All CLI behavior lives in
+Run as ``<python> <root>/asset-gen.py`` from any working directory; no
+PYTHONPATH setup needed. All CLI behavior lives in
 ``src.mcp_server.server:main``.
+
+With no ``--project-root`` the asset jail follows the server's launch
+directory — for an MCP client that is the client's workspace (your
+project). Pass ``--project-root <dir>`` to pin a different tree, or
+``--workspace name=<dir>`` to approve a second one.
 """
 
 import sys

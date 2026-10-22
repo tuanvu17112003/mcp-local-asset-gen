@@ -1,4 +1,4 @@
-"""Server configuration (contract ``C1-mcp-asset-tool`` v0.1.0).
+"""Server configuration (contract ``C1-mcp-asset-tool`` v0.1.5).
 
 Pure stdlib, frozen dataclass, no I/O at import or construction.
 ``project_root`` is normalized to an absolute path in ``__post_init__``;
@@ -8,8 +8,8 @@ containment checks happen per call in :mod:`src.mcp_server.validation`.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Union
+from dataclasses import dataclass, field
+from typing import Dict, Union
 from urllib.parse import urlparse
 
 DEFAULT_COMFYUI_URL = "http://127.0.0.1:8188"
@@ -35,11 +35,18 @@ class ServerConfig:
 
     :param project_root: asset jail root; every ``save_path`` must resolve
         inside it (enforced by ``resolve_save_path``).
+    :param project_roots: named extra jail roots (``{name: abspath}``);
+        each value is abspath-normalized and must be an existing
+        directory (``INVALID_PROJECT_ROOT`` otherwise). The name
+        ``"default"`` is reserved — it always maps to ``project_root``.
     :param comfyui_url: ComfyUI base URL. Non-loopback hosts are refused
         unless ``allow_remote`` is explicitly ``True``.
     :param max_concurrent: VRAM guard; jobs beyond this return ``QUEUED``.
     :param job_timeout_s: per-job timeout in seconds.
     :param allow_remote: explicit opt-in to a non-loopback ``comfyui_url``.
+    :param allow_any_path: explicit opt-in that lets an ABSOLUTE
+        ``save_path`` land outside every approved root (C1 v0.1.5).
+        Default ``False`` — containment stays enforced.
     :param version: server version string.
     """
 
@@ -49,6 +56,8 @@ class ServerConfig:
     job_timeout_s: float = DEFAULT_JOB_TIMEOUT_S
     allow_remote: bool = False
     version: str = SERVER_VERSION
+    project_roots: Dict[str, str] = field(default_factory=dict)
+    allow_any_path: bool = False
 
     def __post_init__(self) -> None:
         root = os.fspath(self.project_root) if isinstance(self.project_root, os.PathLike) else self.project_root
@@ -61,6 +70,32 @@ class ServerConfig:
                 % (root,)
             )
         object.__setattr__(self, "project_root", absolute_root)
+        normalized: Dict[str, str] = dict(self.project_roots) if self.project_roots else {}
+        for _name, _path in normalized.items():
+            if not isinstance(_name, str) or not _name:
+                raise ValueError(
+                    "INVALID_PROJECT_ROOT: workspace name must be a non-empty "
+                    "string, got %r" % (_name,)
+                )
+            if _name == "default":
+                raise ValueError(
+                    "INVALID_PROJECT_ROOT: workspace name %r is reserved "
+                    "(it maps to project_root)" % (_name,)
+                )
+            _raw = os.fspath(_path) if isinstance(_path, os.PathLike) else _path
+            if not isinstance(_raw, str) or not _raw:
+                raise ValueError(
+                    "INVALID_PROJECT_ROOT: workspace %r root must be a "
+                    "non-empty path" % (_name,)
+                )
+            _abs = os.path.abspath(_raw)
+            if not os.path.isdir(_abs):
+                raise ValueError(
+                    "INVALID_PROJECT_ROOT: workspace %r root %r is not an "
+                    "existing directory" % (_name, _path)
+                )
+            normalized[_name] = _abs
+        object.__setattr__(self, "project_roots", normalized)
         if not isinstance(self.comfyui_url, str) or not self.comfyui_url:
             raise ValueError("INVALID_COMFYUI_URL: comfyui_url must be a non-empty URL string")
         parsed = urlparse(self.comfyui_url)
@@ -97,6 +132,28 @@ class ServerConfig:
             )
         if not isinstance(self.version, str) or not self.version:
             raise ValueError("INVALID_VERSION: version must be a non-empty string")
+        if not isinstance(self.allow_any_path, bool):
+            raise ValueError(
+                "INVALID_ALLOW_ANY_PATH: allow_any_path must be a bool, got %r"
+                % (self.allow_any_path,)
+            )
+
+    def workspace_root(self, name: str) -> str:
+        """Return the abspath jail root for workspace ``name``.
+
+        ``"default"`` maps to :attr:`project_root`; any other known name
+        maps to its configured root. Unknown names raise ``ValueError``
+        ``INVALID_WORKSPACE`` (call ``server_info`` for the configured map).
+        """
+        if name == "default":
+            return self.project_root
+        try:
+            return self.project_roots[name]
+        except (KeyError, TypeError):
+            raise ValueError(
+                "INVALID_WORKSPACE: unknown workspace %r (see server_info "
+                "workspaces for the configured names)" % (name,)
+            ) from None
 
 
 __all__ = [

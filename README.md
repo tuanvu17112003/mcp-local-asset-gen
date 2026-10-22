@@ -36,8 +36,15 @@ saved into your project, with the relative path returned for direct embedding:
 | `check_model` | Verify a model file is present in a ComfyUI loader (`unet`/`clip`/`vae`/`checkpoint`) |
 | `server_info` | Backend reachability (`reachable`), queue depth, pinned model list, version |
 
-Path confinement is server-side: tools can only write inside the project root
-(`../../etc/pass.png` → `POLICY_DENIED`), never overwrite without an explicit flag.
+Path confinement is server-side: tools can only write inside an approved
+root — the project root plus any named workspace (`../../etc/pass.png` →
+`POLICY_DENIED`), never overwrite without an explicit flag. The agent
+chooses the output path: `save_path` may be relative (resolved under the
+selected workspace root) or absolute (used exactly as given when it lands
+inside an approved root; `--allow-any-path` lifts that check). The leaf
+must be a lowercase `.png` file, so the requested path is the written path.
+Results carry `asset_path` (relative to the owning root), `asset_root` (that
+owning root) and `asset_path_absolute`.
 
 ## Prerequisites
 
@@ -74,14 +81,20 @@ OpenCode (`opencode.json`, V2 shape — adjust paths/URL to your machine):
     "servers": {
       "asset-gen": {
         "type": "local",
-        "command": ["<your-venv-python>", "-m", "src.mcp_server.server",
-                    "--comfyui-url", "http://127.0.0.1:8000"],
-        "cwd": "<this-repo>"
+        "command": ["<your-venv-python>", "<this-repo>/asset-gen.py",
+                    "--comfyui-url", "http://127.0.0.1:8000"]
       }
     }
   }
 }
 ```
+
+Use the `asset-gen.py` launcher: it works from any working directory (no
+`PYTHONPATH`, no pinned `cwd`). With no `--project-root`, the server jails
+relative `save_path` values under the **client's workspace** — the project
+you are working in — so the agent's chosen path lands where you expect.
+Call `server_info` once to confirm `project_root` is your project; add
+`"--project-root", "<dir>"` to pin a different tree.
 
 Verify: call `server_info` → `{"backend":"comfyui", ..., "reachable":true}`.
 
@@ -92,7 +105,7 @@ ico=true)` → PNG + `@2x/@3x` + `‑32px/‑64px` + `.ico`, all embedded by pat
 ## Verify
 
 ```bash
-pytest tests/ -q   # 196 passed + environment-conditional skips on a full env
+pytest tests/ -q   # 339 passed + environment-conditional skips on a full env
 ```
 
 `server_info` unreachable never errors (`reachable:false`); generation without

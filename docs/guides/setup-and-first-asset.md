@@ -56,16 +56,23 @@ in the JSON file.
     "servers": {
       "local-asset-gen": {
         "type": "local",
-        "command": ["python", "-m", "src.mcp_server.server", "--project-root", "."]
+        "command": ["python", "/path/to/mcp-local-asset-gen/asset-gen.py"]
       }
     }
   }
 }
 ```
 
-Run from the project root so `--project-root "."` jails every `save_path`
-under it (use an absolute path when the working directory differs). This
-uses the stdio default; HTTP is opt-in only (`"--transport", "http",
+The `asset-gen.py` launcher works from any working directory (no
+`PYTHONPATH`, no `cwd` pin). With no `--project-root`, the server jails
+every relative `save_path` under its launch directory — which, for an MCP
+client that starts the server in your project, is your project. Agents may
+also pass an absolute `save_path`; it is honoured as given when it lands
+inside an approved root (`server_info.project_root` plus the named
+`workspaces`). Add `"--project-root", "<dir>"` to pin a specific root, or
+`"--workspace", "name=<dir>"` to approve a second tree, or
+`"--allow-any-path"` to lift the containment check for absolute paths.
+This uses the stdio default; HTTP is opt-in only (`"--transport", "http",
 "--port", "8000"`). Server module and flags confirmed against
 `src/mcp_server/server.py` (`build_arg_parser`); see
 `src/mcp_server/opencode_wiring.md` and the server README for the full
@@ -86,6 +93,15 @@ active, and confirm OpenCode lists the `local-asset-gen` tools:
 `server_info` call is the cheapest health check — if it reports the
 backend unreachable, fix ComfyUI first (see Troubleshooting on
 BACKEND_UNAVAILABLE) rather than burning generation minutes.
+
+**Verify the jail root (once per project).** `server_info` reports
+`project_root` — the directory every relative `save_path` resolves
+under. With the recommended wiring (the `asset-gen.py` launcher, no
+`cwd` pin) the server starts in the **client's workspace**, i.e. your
+project. If `project_root` is *not* your project, either launch the
+client from the project or add `--project-root <dir>` to the command.
+Absolute `save_path` values are honoured as given, but only inside an
+approved root (`project_root` plus any named `--workspace` root).
 
 ### Step 2 — Generate the golden bear avatar (5 min, LIVE)
 
@@ -125,7 +141,6 @@ directory. Confirm every path is a project-root-relative POSIX path
 with no `..` segments; anything escaping the root is rejected with
 POLICY_DENIED. (The `.svg` vector variant is post-MVP only and is
 not part of this run.)
-
 ### Step 4 — Embed the asset in UserProfile.tsx (3 min)
 
 The sample component already imports the 1x leaf with a relative
@@ -188,10 +203,24 @@ and shapes; it never proves image quality.
   generation usually means the FP8 checkpoint is loaded on a card
   that cannot hold it — switch back to GGUF-Q4. Close other
   GPU-resident apps before the timed run.
-- **Path-escape POLICY_DENIED.** Asset paths must stay inside the
-  project root as relative POSIX paths. If a call is denied, check
-  for absolute paths or `..` segments in `save_path` and retry with
-  a contained path such as `assets/images/<stem>.png`.
+- **Path-escape POLICY_DENIED.** Asset paths must stay inside an approved
+  root (`server_info.project_root` plus the named `workspaces`). Relative
+  paths resolve under the selected workspace root; absolute paths are used
+  as given but must land inside an approved root. If a call is denied, the
+  message lists the approved roots — retry with a path inside one, drop
+  the `..` segments, or ask the human to add the tree (`--workspace
+  name=path`) or to start the server with `--allow-any-path`.
+- **"The jail root is not my project".** `server_info.project_root` is the
+  directory the server was started in. Launch the client from your project
+  (the launcher form starts the server in the client's workspace) or add
+  `--project-root <dir>` to the server command. An absolute `save_path`
+  outside the approved roots is refused with `POLICY_DENIED` — add the tree
+  with `--workspace name=path` if the human wants it approved.
+- **"My file name was rejected".** The leaf must be a lowercase `.png` file
+  with a safe stem (`[A-Za-z0-9._-]`, at least one letter or digit): the
+  server writes PNG assets, so `icon.webp`, `icon.PNG` and `mon icône.png`
+  are refused pre-backend. Generate to a `.png` name and rename afterwards
+  if you need another extension.
 - **MODEL_MISSING / GENERATION_FAILED / POSTPROCESS_FAILED.** Missing
   checkpoint file (re-check model placement), diffusion failure
   (retry once, then inspect ComfyUI logs), or background-removal

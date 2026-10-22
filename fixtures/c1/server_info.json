@@ -1,1 +1,1 @@
-{"backend": "comfyui", "comfyui_url": "http://127.0.0.1:8188", "models": ["flux-schnell-gguf-q4", "flux-schnell-fp8"], "version": "0.1.0", "project_root": "C:/example/project", "reachable": true, "queue_depth": 0}
+{"backend": "comfyui", "comfyui_url": "http://127.0.0.1:8188", "models": ["flux-schnell-gguf-q4", "flux-schnell-fp8"], "version": "0.1.0", "project_root": "C:/example/project", "workspaces": {"default": "C:/example/project"}, "allow_any_path": false, "reachable": true, "queue_depth": 0}

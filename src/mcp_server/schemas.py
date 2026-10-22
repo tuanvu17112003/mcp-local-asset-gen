@@ -1,17 +1,26 @@
-"""JSON-schema dicts for the four C1 tools (contract v0.1.1, Operations).
+"""JSON-schema dicts for the four C1 tools (contract v0.1.6, Operations).
 
 Plain dicts only — no third-party schema library. Mirrors contract
 section "Operations / inputs / outputs" exactly:
 
 * ``generate_app_asset({prompt*, category*, save_path*, width?, height?,
   format?, remove_bg?, style_preset?, seed?, overwrite?, job_id?,
-  icon_sizes?, ico?})``
-  returns ``{asset_path, width, height, format, seed, style_preset, job_id}``
-* ``refine_asset({asset_id|asset_path, instruction*, save_path?, strength?, job_id?})``
-  returns ``{asset_path, job_id, parent_job_id}``
+  icon_sizes?, ico?, workspace?})``
+  returns ``{asset_path, asset_path_absolute, asset_root, width, height,
+  format, seed, style_preset, job_id}``
+* ``refine_asset({asset_id|asset_path, instruction*, save_path?, strength?, job_id?,
+  workspace?})``
+  returns ``{asset_path, asset_path_absolute, asset_root, job_id, parent_job_id}``
 * ``server_info({})`` returns
-  ``{backend, comfyui_url, models, version, project_root, reachable, queue_depth}``
+  ``{backend, comfyui_url, models, version, project_root, workspaces,
+  allow_any_path, reachable, queue_depth}``
 * ``check_model({name*, kind?})`` returns ``{available, loader, checked_at}``
+
+C1 v0.1.6 (user request, 2026-10-22): ``save_path`` may be ABSOLUTE —
+the agent chooses the output location — as long as it lands inside an
+approved root (the project root or a named workspace). Relative paths keep
+resolving under the selected workspace root. The leaf must be
+``<stem>.png`` so the requested path is the written path.
 
 The contract's golden call is kept as :data:`BEAR_AVATAR_EXAMPLE`, a
 documented valid ``generate_app_asset`` input.
@@ -47,8 +56,12 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                 "type": "string",
                 "minLength": 1,
                 "description": (
-                    "Relative POSIX path under the project root (required, "
-                    "must stay inside root; no '..' traversal)."
+                    "Output path (required). May be ABSOLUTE "
+                    "(e.g. \"C:/proj/src/assets/icon.png\" — used exactly as "
+                    "given, must land inside an approved root) or relative "
+                    "(resolved under the selected workspace root). Must name "
+                    "a .png file (the server writes PNG assets); no '..' "
+                    "traversal; Windows backslashes are accepted."
                 ),
             },
             "width": {
@@ -107,12 +120,23 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                 "default": False,
                 "description": "Also emit a <stem>.ico file (default false).",
             },
+            "workspace": {
+                "type": "string",
+                "minLength": 1,
+                "default": "default",
+                "description": (
+                    "Named server-side root for this call (default "
+                    "\"default\"); unknown names fail with INVALID_WORKSPACE."
+                ),
+            },
         },
     },
     "output_schema": {
         "type": "object",
         "required": [
             "asset_path",
+            "asset_path_absolute",
+            "asset_root",
             "width",
             "height",
             "format",
@@ -122,6 +146,8 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
         ],
         "properties": {
             "asset_path": {"type": "string"},
+            "asset_path_absolute": {"type": "string"},
+            "asset_root": {"type": ["string", "null"]},
             "width": {"type": "integer"},
             "height": {"type": "integer"},
             "format": {"type": "string"},
@@ -162,7 +188,11 @@ REFINE_ASSET_SCHEMA: Dict[str, Any] = {
             "save_path": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Relative POSIX path for the refined asset (must stay inside root).",
+                "description": (
+                    "Output path for the refined asset (may be absolute "
+                    "inside an approved root; relative resolves under the "
+                    "selected workspace root)."
+                ),
             },
             "strength": {
                 "type": "number",
@@ -175,13 +205,24 @@ REFINE_ASSET_SCHEMA: Dict[str, Any] = {
                 "minLength": 1,
                 "description": "Optional idempotency key; re-refine with the same job_id retries idempotently.",
             },
+            "workspace": {
+                "type": "string",
+                "minLength": 1,
+                "default": "default",
+                "description": (
+                    "Named server-side root for this call (default "
+                    "\"default\"); unknown names fail with INVALID_WORKSPACE."
+                ),
+            },
         },
     },
     "output_schema": {
         "type": "object",
-        "required": ["asset_path", "job_id", "parent_job_id"],
+        "required": ["asset_path", "asset_path_absolute", "asset_root", "job_id", "parent_job_id"],
         "properties": {
             "asset_path": {"type": "string"},
+            "asset_path_absolute": {"type": "string"},
+            "asset_root": {"type": ["string", "null"]},
             "job_id": {"type": "string"},
             "parent_job_id": {"type": "string"},
         },
@@ -199,13 +240,15 @@ SERVER_INFO_SCHEMA: Dict[str, Any] = {
     },
     "output_schema": {
         "type": "object",
-        "required": ["backend", "comfyui_url", "models", "version", "project_root", "reachable", "queue_depth"],
+        "required": ["backend", "comfyui_url", "models", "version", "project_root", "workspaces", "allow_any_path", "reachable", "queue_depth"],
         "properties": {
             "backend": {"type": "string"},
             "comfyui_url": {"type": "string"},
             "models": {"type": "array", "items": {"type": "string"}},
             "version": {"type": "string"},
             "project_root": {"type": "string"},
+            "workspaces": {"type": "object", "additionalProperties": {"type": "string"}},
+            "allow_any_path": {"type": "boolean"},
             "reachable": {"type": "boolean"},
             "queue_depth": {"type": ["integer", "null"]},
         },
