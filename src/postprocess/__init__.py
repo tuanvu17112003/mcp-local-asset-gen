@@ -3,9 +3,11 @@
 Producer of contract C3-processed-asset v0.1.1 (canned-path side).
 
 Live-model note: the ``rembg`` live path requires Python >=3.11 plus an
-offline pre-downloaded model cache (``rembg d <model>``, ``U2NET_HOME``);
-on older interpreters :func:`remove_background` raises
-``SegmentationFailedError`` without attempting any download.
+offline pre-downloaded model cache (``python -c "from rembg import
+new_session; new_session('<model>')"``, ``U2NET_HOME``); on older
+interpreters :func:`remove_background` raises ``SegmentationFailedError``
+without attempting any download. The ``rembg`` CLI extra is not installed
+(see ``requirements.txt``).
 """
 
 from __future__ import annotations

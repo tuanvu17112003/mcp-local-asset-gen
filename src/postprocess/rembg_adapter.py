@@ -113,9 +113,11 @@ def remove_background(
         import rembg  # lazy: only on the live path
     except ImportError as exc:
         raise SegmentationFailedError(
-            "[SEGMENTATION_FAILED] 'rembg' is not installed; pre-download the "
-            f"model offline with `rembg d {model}` (honouring the U2NET_HOME "
-            "model cache) and install rembg before using the live path."
+            "[SEGMENTATION_FAILED] 'rembg' is not installed (Python 3.11+ "
+            "required); pre-download the model offline with "
+            f"`python -c \"from rembg import new_session; new_session('{model}')\"` "
+            "(honouring the U2NET_HOME model cache) and install rembg before "
+            "using the live path."
         ) from exc
 
     try:

@@ -1,6 +1,13 @@
-# Runtime dependencies — mcp-local-asset-gen (MCP server + postprocessing)
+# Runtime dependencies - mcp-local-asset-gen (MCP server + postprocessing)
 # Python >= 3.11 required (rembg floor). Tested on 3.13.12 (Windows).
 # External services (NOT pip): local ComfyUI + FLUX.1-schnell weights (see README).
+#
+# NOTE: rembg's "cli" extra is intentionally NOT installed. It pins
+# python-multipart<0.0.22 while fastmcp 4.1.0 (via fastmcp-slim[server])
+# requires python-multipart>=0.0.26 - an unsatisfiable pair in one
+# environment. The server only uses rembg as a library (`new_session` /
+# `remove`); pre-download the segmentation model with the Python one-liner
+# in docs/guides/setup-and-first-asset.md.
 fastmcp==4.1.0
-rembg[cpu,cli]==2.0.85
+rembg[cpu]==2.0.85
 Pillow==12.3.0

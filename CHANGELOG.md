@@ -50,6 +50,15 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   next to its parent, in that same root.
 
 ### Fixed
+- **Fresh install no longer fails on a dependency conflict.** `rembg[cli]`
+  pins `python-multipart<0.0.22` while `fastmcp 4.1.0` (via
+  `fastmcp-slim[server]`) requires `python-multipart>=0.0.26`; pip could not
+  satisfy both, so `pip install -r requirements.txt` failed with
+  `ResolutionImpossible` on a clean environment. The `cli` extra is dropped
+  (`rembg[cpu]==2.0.85`): the server only uses rembg as a library
+  (`new_session`/`remove`). Pre-download the model with
+  `python -c "from rembg import new_session; new_session('u2net')"` instead
+  of `rembg d`; the docs, setup notes and the runtime error message say so.
 - Published wiring docs corrected (`README.md` OpenCode snippet and test
   count, `src/mcp_server/opencode_wiring.md`, `asset-gen.py` docstring):
   they no longer teach the pattern that pinned the asset jail to the MCP
@@ -60,6 +69,10 @@ Copy the relevant entry into the GitHub Release notes when tagging.
 
 ### Verified
 - 339 passed + 3 env-conditional skips + 11 subtests (venv, Python 3.13).
+- Fresh-install proof (2026-10-23): a brand-new empty venv installing
+  `requirements-dev.txt` resolves cleanly (fastmcp 4.1.0, rembg 2.0.85
+  without the `cli` extra, Pillow 12.3.0, python-multipart 0.0.32), the
+  suite passes (339/3/11) and the live stdio E2E passes in that venv.
 - Live MCP stdio end-to-end with the configured launcher argv from a
   foreign working directory: `project_root` follows the client, an absolute
   `save_path` lands exactly there, a relative one lands under the root,

@@ -2,11 +2,15 @@
 
 Authoritative owner: PQM0. BASELINED v0.1.1 — controlled amendments only.
 (v0.1.0: sha256:A7540BE3…9017. v0.1.1 amendment 2026-10-18: icon_sizes +
-.ico export, authorized by user "implement #3".)
+.ico export, authorized by user "implement #3". Documentation erratum
+2026-10-23: the model pre-download is described in the setup guide instead
+of the `rembg d` CLI — the `rembg` CLI extra is not installed (dependency
+conflict, see requirements.txt); no normative requirement changed.)
 
 - ID / version / content hash: `C3-processed-asset` / `v0.1.1` /
-  `sha256:A1B822676A413700A5822DACFE830335ECF5BC98E0AD28B9205372D36877F0EE`
-  frozen 2026-10-18.
+  `sha256:8563E3EA83F5129D24A6BA17A1D4F64D8E604D97A6BE5E4D1C4BF48B6345D0D3`
+  frozen 2026-10-18; re-frozen 2026-10-23 after the documentation erratum
+  (normative content unchanged).
 - Status: Baselined v0.1.1 (supersedes v0.1.0; additive only).
 - Producer / consumers / owner: Producer `mod-postprocess`; consumers
   `mod-mcp-core`, `mod-integration`; PQM0 owns.
@@ -40,7 +44,7 @@ Authoritative owner: PQM0. BASELINED v0.1.1 — controlled amendments only.
   `LICENSE_REQUIRED (bria without acceptance)`, `VECTORIZE_FAILED`. No partial sibling sets returned as success; retry is
   fresh `process` call (idempotent, deterministic given seed+inputs).
 - Authorization / trust: Offline models only, cached per-user (`U2NET_HOME`;
-  pre-download via `rembg d`); no upload to hosted removal APIs. License
+  offline pre-download per the setup guide); no upload to hosted removal APIs. License
   gate: `u2net`/`isnet-general-use` = FOSS-compatible default path;
   `bria-rmbg` (RMBG-1.4, `bria-rmbg-1.4` license) = NON-commercial, needs
   paid BRIA agreement for commercial use → server MUST reject

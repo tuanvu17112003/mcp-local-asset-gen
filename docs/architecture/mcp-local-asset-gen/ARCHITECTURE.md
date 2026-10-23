@@ -41,7 +41,7 @@ relative path returned → agent embeds in code.
   RMBG-1.4` is NON-commercial (paid BRIA agreement needed) → explicit
   opt-in only, default OFF**, flagged in C3. Note: `rembg` needs Python
   `>=3.11` (env here is 3.10.11 → `uv`/venv route at dispatch); models
-  cache per-user (`U2NET_HOME`), `rembg d` pre-downloads, session reuse.
+  cache per-user (`U2NET_HOME`), offline pre-download (see the setup guide), session reuse.
 - **Vectorization:** DEFERRED post-MVP per Q4. Verified for later:
   visioncortex `vtracer` (MIT, `pip install vtracer`; 1.0.0a4 API
   `convert_file/convert_bytes` + `Config` presets — differs from legacy

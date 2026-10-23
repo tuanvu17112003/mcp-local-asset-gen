@@ -46,9 +46,14 @@ Never download models inside tests or inside `process()`. Models are
 pre-downloaded offline under covering authority before any live run:
 
 ```console
-rembg d u2net
-rembg d isnet-general-use
+python -c "from rembg import new_session; new_session('u2net')"
+python -c "from rembg import new_session; new_session('isnet-general-use')"
 ```
+
+(The `rembg` CLI extra is deliberately not installed: it pins
+`python-multipart<0.0.22`, which conflicts with `fastmcp 4.1.0`'s
+`python-multipart>=0.0.26`. Use the Python one-liners above instead of
+`rembg d`.)
 
 The default model cache is `~/.u2net`; set `U2NET_HOME` to relocate
 it. `remove_background` never triggers a download: the live path uses

@@ -38,7 +38,8 @@ not part of the 15-minute budget.
   checkpoint (~17.2 GB on disk) for higher fidelity. Budget the model
   download plus a few hundred megabytes for generated PNGs and the
   per-user `rembg` model cache (`U2NET_HOME`, pre-downloadable with
-  `rembg d`).
+  `python -c "from rembg import new_session; new_session('u2net')"`; the
+  `rembg` CLI extra is not installed — see `requirements.txt`).
 
 ## OpenCode V2 configuration
 
