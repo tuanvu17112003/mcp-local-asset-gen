@@ -5,9 +5,9 @@
 # NOTE: rembg's "cli" extra is intentionally NOT installed. It pins
 # python-multipart<0.0.22 while fastmcp 4.1.0 (via fastmcp-slim[server])
 # requires python-multipart>=0.0.26 - an unsatisfiable pair in one
-# environment. The server only uses rembg as a library (`new_session` /
-# `remove`); pre-download the segmentation model with the Python one-liner
-# in docs/guides/setup-and-first-asset.md.
+# environment. Do not install rembg[cpu,cli]. The server only uses rembg as
+# a library (`new_session` / `remove`); pre-download the segmentation model
+# with the Python one-liner in docs/guides/setup-and-first-asset.md.
 fastmcp==4.1.0
 rembg[cpu]==2.0.85
 Pillow==12.3.0

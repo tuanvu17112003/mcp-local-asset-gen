@@ -68,11 +68,12 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   when a client launches the server outside the project).
 
 ### Verified
-- 339 passed + 3 env-conditional skips + 11 subtests (venv, Python 3.13).
+- 342 passed + 3 env-conditional skips + 11 subtests (venv, Python 3.13).
 - Fresh-install proof (2026-10-23): a brand-new empty venv installing
   `requirements-dev.txt` resolves cleanly (fastmcp 4.1.0, rembg 2.0.85
-  without the `cli` extra, Pillow 12.3.0, python-multipart 0.0.32), the
-  suite passes (339/3/11) and the live stdio E2E passes in that venv.
+  without the `cli` extra, Pillow 12.3.0, python-multipart 0.0.32),
+  `pip check` reports no broken requirements, the suite passes (342/3/11)
+  and the live stdio E2E passes in that venv.
 - Live MCP stdio end-to-end with the configured launcher argv from a
   foreign working directory: `project_root` follows the client, an absolute
   `save_path` lands exactly there, a relative one lands under the root,

@@ -115,7 +115,7 @@ def test_live_path_version_guard_no_download():
         remove_background(_png_bytes())
     assert "SEGMENTATION_FAILED" in str(excinfo.value)
     msg = str(excinfo.value)
-    assert ("3.11" in msg) or ("rembg d" in msg)
+    assert ("3.11" in msg) or ("new_session" in msg)
 
 
 def test_canned_path_never_imports_rembg(monkeypatch):

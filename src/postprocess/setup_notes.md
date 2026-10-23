@@ -32,10 +32,11 @@ Installing packages was NOT performed as part of this change. When
 installation is authorized, the live path needs:
 
 ```console
-pip install rembg pillow
+pip install "rembg[cpu]==2.0.85" pillow
 ```
 
-No other runtime dependency is required. In particular, `vtracer` is
+(or `pip install -r requirements.txt`, which is the supported route). No
+other runtime dependency is required. In particular, `vtracer` is
 explicitly NOT installed: SVG vectorization is deferred post-MVP (see
 below) and the `vectorize_rgba` stub must keep working with stdlib +
 Pillow only.
@@ -43,7 +44,8 @@ Pillow only.
 ## Model pre-download and cache
 
 Never download models inside tests or inside `process()`. Models are
-pre-downloaded offline under covering authority before any live run:
+pre-downloaded under covering authority before any live run (the download
+itself needs network once):
 
 ```console
 python -c "from rembg import new_session; new_session('u2net')"
@@ -53,12 +55,15 @@ python -c "from rembg import new_session; new_session('isnet-general-use')"
 (The `rembg` CLI extra is deliberately not installed: it pins
 `python-multipart<0.0.22`, which conflicts with `fastmcp 4.1.0`'s
 `python-multipart>=0.0.26`. Use the Python one-liners above instead of
-`rembg d`.)
+`rembg d`; the `rembg` console script left by the base package is broken
+without that extra — do not run it and do not install `rembg[cpu,cli]`.)
 
-The default model cache is `~/.u2net`; set `U2NET_HOME` to relocate
-it. `remove_background` never triggers a download: the live path uses
-a lazily created `rembg` session against the already-cached weights,
-and any failure surfaces as `SegmentationFailedError`.
+The model cache is `~/.rembg/models/<name>` (rembg 2.0.85); set
+`U2NET_HOME` to relocate it (legacy `~/.u2net` files keep loading). The
+adapter itself never downloads, but the live path asks `rembg` for a
+session: if the model is absent, `rembg` fetches it once (network
+required), so pre-download before an offline run. Any failure surfaces as
+`SegmentationFailedError`.
 
 The default model is `u2net`; `isnet-general-use` is the quality
 option. Session reuse (one `rembg.new_session(model)` per model,

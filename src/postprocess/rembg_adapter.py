@@ -1,7 +1,9 @@
 """Background-removal adapter (contract C3-processed-asset v0.1.0).
 
-Pillow-only canned path + version-guarded lazy live path. This function
-never attempts any model download.
+Pillow-only canned path + version-guarded lazy live path. The adapter never
+downloads a model itself, but the live path asks ``rembg`` for a session: if
+the model is absent, ``rembg.new_session`` downloads it once (network
+required) — pre-download it before an offline run (see ``setup_notes.md``).
 """
 
 from __future__ import annotations
@@ -48,7 +50,9 @@ def remove_background(
     (a) unknown model -> ValueError; (b) bria-rmbg without
     acceptance -> LicenseRequiredError; (c) canned ``mask_provider``
     path (no ``rembg`` import attempted); (d) live ``rembg`` path with
-    Python-floor guard and lazy import. Never downloads models.
+    Python-floor guard and lazy import. The adapter itself never downloads:
+    a cached model is used; a missing model makes ``rembg`` fetch it once
+    (network required) — pre-download before offline runs.
     """
     # (0) strict PNG-first: before any decode attempt or version guard.
     _require_png_signature(png_bytes)
@@ -114,10 +118,10 @@ def remove_background(
     except ImportError as exc:
         raise SegmentationFailedError(
             "[SEGMENTATION_FAILED] 'rembg' is not installed (Python 3.11+ "
-            "required); pre-download the model offline with "
+            "required). Install it first (`pip install -r requirements.txt`), "
+            "then pre-download the model once (network required) with "
             f"`python -c \"from rembg import new_session; new_session('{model}')\"` "
-            "(honouring the U2NET_HOME model cache) and install rembg before "
-            "using the live path."
+            "(honouring the model cache) before using the live path."
         ) from exc
 
     try:

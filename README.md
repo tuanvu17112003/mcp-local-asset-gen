@@ -65,6 +65,14 @@ pip install -r requirements.txt   # runtime (add -dev for pytest)
 Download the weights into your ComfyUI `models/` folders
 (`diffusion_models/`, `text_encoders/`, `vae/`) — they are **not** in this repo.
 
+The background-removal model is downloaded once on first use (network
+required); to pre-download it, run
+`python -c "from rembg import new_session; new_session('u2net')"`.
+Do **not** install `rembg[cpu,cli]`: its CLI extra pins
+`python-multipart<0.0.22`, which conflicts with `fastmcp 4.1.0`
+(`python-multipart>=0.0.26`) — the `rembg` console script is therefore not
+usable; use the Python one-liner. Details: `docs/guides/setup-and-first-asset.md`.
+
 ## Run the server / register with a client
 
 Direct:
@@ -105,7 +113,7 @@ ico=true)` → PNG + `@2x/@3x` + `‑32px/‑64px` + `.ico`, all embedded by pat
 ## Verify
 
 ```bash
-pytest tests/ -q   # 339 passed + environment-conditional skips on a full env
+pytest tests/ -q   # 342 passed + environment-conditional skips on a full env
 ```
 
 `server_info` unreachable never errors (`reachable:false`); generation without
