@@ -1,7 +1,7 @@
 # Postprocess setup notes
 
 This package implements the canned-path side of contract
-C3-processed-asset v0.1.0. The image work itself is Pillow-only; live
+C3-processed-asset v0.1.1. The image work itself is Pillow-only; live
 background removal additionally needs `rembg` and a pre-downloaded
 model cache.
 
@@ -11,11 +11,10 @@ Live background removal requires Python 3.11 or newer. The pinned
 floor is Python >= 3.11 because `rembg` and its model runtimes are
 only exercised and supported there.
 
-This checkout currently runs Python 3.10.11, so the live `rembg` path
-is unreachable here by design: `remove_background` without a canned
-`mask_provider` raises `SegmentationFailedError` on this interpreter
-instead of attempting any download. The canned path (tests, fixtures)
-works on any supported interpreter.
+The live path is guarded at runtime: on an interpreter below 3.11,
+`remove_background` without a canned `mask_provider` raises
+`SegmentationFailedError` instead of attempting any download. The canned
+path (tests, fixtures) works on any supported interpreter.
 
 To run the live path, use a Python 3.11+ interpreter, for example:
 
@@ -43,9 +42,9 @@ Pillow only.
 
 ## Model pre-download and cache
 
-Never download models inside tests or inside `process()`. Models are
-pre-downloaded under covering authority before any live run (the download
-itself needs network once):
+Models are pre-downloaded under covering authority before any live run (the
+download itself needs network once), so tests and `process()` never have to
+touch the network:
 
 ```console
 python -c "from rembg import new_session; new_session('u2net')"

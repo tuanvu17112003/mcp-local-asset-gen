@@ -1,4 +1,4 @@
-"""Background-removal adapter (contract C3-processed-asset v0.1.0).
+"""Background-removal adapter (contract C3-processed-asset v0.1.1).
 
 Pillow-only canned path + version-guarded lazy live path. The adapter never
 downloads a model itself, but the live path asks ``rembg`` for a session: if

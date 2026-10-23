@@ -106,16 +106,19 @@ def test_negative_pad_value_error():
         trim_and_pad(img, pad_px=-1)
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("rembg") is not None,
-    reason="live path present; covered live by IC-2",
-)
-def test_live_path_version_guard_no_download():
+def test_live_path_missing_rembg_message(monkeypatch):
+    """The missing-rembg guidance must name the new pre-download one-liner.
+
+    ``sys.modules['rembg'] = None`` makes ``import rembg`` raise ImportError
+    deterministically, so this runs even where rembg is installed.
+    """
+    monkeypatch.setitem(sys.modules, "rembg", None)
     with pytest.raises(SegmentationFailedError) as excinfo:
         remove_background(_png_bytes())
-    assert "SEGMENTATION_FAILED" in str(excinfo.value)
     msg = str(excinfo.value)
-    assert ("3.11" in msg) or ("new_session" in msg)
+    assert "SEGMENTATION_FAILED" in msg
+    assert "from rembg import new_session" in msg
+    assert "rembg d" not in msg
 
 
 def test_canned_path_never_imports_rembg(monkeypatch):

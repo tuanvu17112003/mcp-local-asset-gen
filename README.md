@@ -113,7 +113,7 @@ ico=true)` → PNG + `@2x/@3x` + `‑32px/‑64px` + `.ico`, all embedded by pat
 ## Verify
 
 ```bash
-pytest tests/ -q   # 342 passed + environment-conditional skips on a full env
+pytest tests/ -q   # 343 passed + environment-conditional skips on a full env
 ```
 
 `server_info` unreachable never errors (`reachable:false`); generation without

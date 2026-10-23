@@ -4,8 +4,10 @@ Authoritative owner: PQM0. BASELINED v0.1.2 — controlled amendments only.
 
 - ID / version / content hash or immutable revision:
   `C2-gen-backend-job` / `v0.1.2` /
-  `sha256:8EDF23434A07DA2C64695936405222A27C56B9CB747783E3EBA0165A869D9586`
-  frozen 2026-10-18.
+  `sha256:73ED6F4AECA7E9B3B22B4206FC1C5BF17DD79154B0DC5ECB9B25DEEB6B55206D`
+  frozen 2026-10-18; re-frozen 2026-10-23 (documentation erratum: the
+  recorded value was no longer reproducible with the documented hashing
+  script; normative content unchanged).
   (v0.1.1: `sha256:C4744A42…`; v0.1.0: `sha256:E3EB35CF…`.)
   v0.1.2 amendment 2026-10-18: loader-files query, authorized by user
   "implement #2".
