@@ -240,3 +240,24 @@ Additive to v0.3. Research: `docs/research/pattern-features-research-2026-10-24.
   discarded by design — faint wedge-boundary seams possible from
   resampling).
 - Both are generate-only (`refine_asset` unchanged).
+
+## Addendum v0.5 (2026-10-24) — include_image as a real image block; negative; refine remove_bg
+
+Additive to v0.4.
+
+- `include_image:true` no longer places base64 inside the structured JSON
+  (token bloat): the @1x PNG (seamless tiles: the 2x2 preview) travels as
+  a REAL MCP image content block via `ToolResult(content=[ImageContent],
+  structured_content=<result without image>)`. The structured output no
+  longer advertises an `image` property; orchestrator-level results keep
+  the key (registry replays re-split the same way).
+- New optional `negative` input on `generate_app_asset` (non-empty string
+  or omitted; `INVALID_NEGATIVE` otherwise): passed through to the C2
+  sampler's negative prompt.
+- New optional `remove_bg` input on `refine_asset` (default `false`,
+  `INVALID_REMOVE_BG` otherwise): `true` strips the freshly rendered
+  background (trim stays off — composition preserved). Previously the
+  refined output was always opaque.
+- The `pattern` style template now includes "no text, no letters,
+  no typography" (mitigates schnell's text hallucination on empty
+  regions).

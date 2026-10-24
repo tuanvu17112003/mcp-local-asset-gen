@@ -7,7 +7,19 @@ Copy the relevant entry into the GitHub Release notes when tagging.
 
 ## [Unreleased]
 
+### Changed
+- **`include_image` now returns a real MCP image content block** (C1
+  v0.5) instead of base64 inside the structured JSON — agents see the
+  asset without megabytes of base64 in the tool output (the structured
+  result no longer carries an `image` key).
+- **`refine_asset` gains `remove_bg`** (default false): opt-in background
+  removal on the refined output (previously always opaque).
+- The `pattern` style template now says "no text, no letters" to curb
+  schnell's text hallucination on empty regions.
+
 ### Added
+- **`negative` prompt on `generate_app_asset`** (C1 v0.5): optional
+  non-empty string passed through to the sampler (e.g. "no text").
 - **`palette` + `symmetry` on `generate_app_asset`** (P3+P4, C1/C3 v0.4):
   `palette:["#hex",…]` (2..8) recolors the result to EXACT brand colors
   (deterministic FASTOCTREE quantize + nearest-color mapping, alpha
@@ -117,6 +129,8 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   when a client launches the server outside the project).
 
 ### Verified
+- 377 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
+  2026-10-24 — image-block split, negative, refine remove_bg included).
 - 376 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
   2026-10-24 — P3/P4 included).
 - 366 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,

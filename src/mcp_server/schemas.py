@@ -212,7 +212,6 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
             "seed": {"type": "integer"},
             "style_preset": {"type": "string"},
             "job_id": {"type": "string"},
-            "image": {"type": "object"},
         },
     },
 }
@@ -292,7 +291,6 @@ REFINE_ASSET_SCHEMA: Dict[str, Any] = {
             "asset_root": {"type": ["string", "null"]},
             "job_id": {"type": "string"},
             "parent_job_id": {"type": "string"},
-            "image": {"type": "object"},
         },
     },
 }

@@ -61,7 +61,7 @@ Tools — call exactly these, with these shapes:
   height=512, format="png", remove_bg=null, style_preset="flat", seed=null,
   overwrite=false, job_id=null, icon_sizes=null, ico=false,
   workspace="default", include_image=false, seamless=false, palette=null,
-  symmetry=null}): text-to-image,
+  symmetry=null, negative=null}): text-to-image,
   then transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
   true for icon/avatar. icon_sizes e.g. [32,64] adds -32px/-64px renders;
   ico:true adds a multi-size .ico. format:"svg" traces a vector asset
@@ -74,10 +74,11 @@ Tools — call exactly these, with these shapes:
   symmetry "mirror-x"|"mirror-quad"|"radial:<n>" (n 2-12) enforces
   ornament symmetry.
 - refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
-  job_id=null, workspace="default", include_image=false}): image-to-image
-  tweak; writes a NEW file, never mutates the
-  parent (default save is <stem>_refined.png). strength is (0,1]. The
-  source PNG is uploaded to ComfyUI automatically.
+  job_id=null, workspace="default", include_image=false, remove_bg=false}):
+  image-to-image tweak; writes a NEW file, never mutates the
+  parent (default save is <stem>_refined.png). strength is (0,1]; the
+  source PNG is uploaded automatically; remove_bg:true strips the new
+  background (default keeps it).
 - check_model({name*, kind}): is a weight file present in a ComfyUI loader?
   kind in unet|clip|vae|checkpoint (default all). Use before generating
 - server_info({}): {backend, comfyui_url, models, version, project_root,
@@ -90,8 +91,8 @@ to iterate (pass seed to reproduce).
 
 Rules: YOU choose the output path.
 - save_path may be ABSOLUTE ("C:/proj/src/assets/icon.png") or relative
-  ("assets/icons/icon.png"). An absolute path is used exactly as given; a
-  relative one is resolved under the selected workspace root.
+  ("assets/icons/icon.png"): absolute is used exactly as given, relative
+  resolves under the selected workspace root.
 - The leaf must be a lowercase .png file (or .svg with format:"svg") with
   a safe stem ([A-Za-z0-9._-]): the leaf names the written file, so
   "icon.webp" is refused pre-backend (POLICY_DENIED INVALID_SAVE_PATH).
@@ -103,7 +104,7 @@ Rules: YOU choose the output path.
 - The default project_root is the server's start directory (your
   workspace) unless configured otherwise — compare once via server_info.
   If your target tree is not an approved root, the human must add it
-  (--workspace name=path); you cannot widen the set per call.
+  (--workspace name=path).
 - Result: asset_path (relative to asset_root), asset_path_absolute
   (exact location), asset_root (the approved root owning the file).
 Existing files need overwrite:true. Refine parents must exist. At most
@@ -111,7 +112,7 @@ Existing files need overwrite:true. Refine parents must exist. At most
 idempotent retry).
 
 Errors (machine-readable CODE prefix; fix the cause, don't blindly retry):
-BACKEND_UNAVAILABLE (ComfyUI down — verify via server_info);
+BACKEND_UNAVAILABLE (ComfyUI down);
 GENERATION_FAILED (covers JOB_FAILED/JOB_TIMEOUT payloads); POLICY_DENIED
 (bad path/overwrite); INVALID_* (bad args, rejected pre-backend);
 POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
@@ -204,6 +205,23 @@ def load_postprocess() -> Callable[..., Dict[str, Any]]:
         return _unavailable_postprocess
 
 
+def _with_image_block(result):
+    """Split an orchestrator result into an MCP image block + small dict.
+
+    FastMCP converts a returned ``Image`` into a real image content
+    block only when it is NOT nested inside a dict, so ``result["image"]``
+    (the include_image payload) is moved into ``ToolResult.content`` —
+    the structured JSON stays small (no megabytes of base64 in-band).
+    """
+    image = result.get("image")
+    if image is None:
+        return result
+    from fastmcp.tools import ToolResult
+
+    structured = {k: v for k, v in result.items() if k != "image"}
+    return ToolResult(content=[image], structured_content=structured)
+
+
 def create_server(
     config: Optional[ServerConfig] = None,
     backend_factory: Any = None,
@@ -274,6 +292,7 @@ def create_server(
         seamless: bool = False,
         palette: Optional[Any] = None,
         symmetry: Optional[str] = None,
+        negative: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate an app asset with local ComfyUI + postprocessing."""
         from .validation import validate_tool_args
@@ -298,8 +317,9 @@ def create_server(
                 seamless=seamless,
                 palette=palette,
                 symmetry=symmetry,
+                negative=negative,
             )
-            return orchestrator.generate(args, project_root)
+            return _with_image_block(orchestrator.generate(args, project_root))
         except McpServerError as exc:
             raise RuntimeError(str(exc)) from exc
 
@@ -313,6 +333,7 @@ def create_server(
         job_id: Optional[str] = None,
         workspace: str = "default",
         include_image: bool = False,
+        remove_bg: bool = False,
     ) -> Dict[str, Any]:
         """Refine an existing asset; creates a new file, never mutates."""
         from .validation import validate_refine_args
@@ -327,8 +348,9 @@ def create_server(
                 job_id=job_id,
                 workspace=workspace,
                 include_image=include_image,
+                remove_bg=remove_bg,
             )
-            return orchestrator.refine(args, project_root)
+            return _with_image_block(orchestrator.refine(args, project_root))
         except McpServerError as exc:
             raise RuntimeError(str(exc)) from exc
 

@@ -75,7 +75,7 @@ STYLE_PRESETS = {
     },
     "pattern": {
         "name": "Seamless Pattern",
-        "template": "{prompt}, seamless repeating pattern, tileable, even distribution, flat motif, consistent scale, full-frame pattern",
+        "template": "{prompt}, seamless repeating pattern, tileable, even distribution, flat motif, consistent scale, full-frame pattern, no text, no letters, no typography",
     },
 }
 

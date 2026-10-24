@@ -124,3 +124,57 @@ def test_include_image_must_be_bool():
             save_path="a/bear.png",
             include_image="yes",
         )
+
+
+def test_server_returns_image_block_not_base64_json(tmp_path):
+    """Fix 1 (v0.5): include_image becomes a real MCP image content block.
+
+    The heavy base64 must NOT ride inside the structured JSON (token
+    bloat); it travels as a separate image content block instead.
+    """
+    import asyncio
+    import base64
+
+    from fastmcp import Client
+
+    from src.mcp_server.config import ServerConfig
+    from src.mcp_server.server import create_server
+
+    class FakeBackend:
+        def submit_txt2img(self, **kwargs):
+            return "backend-job-1"
+
+        def fetch_result(self, job_id):
+            return {"png_bytes": FAKE_PNG, "seed": 7}
+
+    def fake_postprocess(png_bytes, **kwargs):
+        stem = kwargs.get("stem", "icon")
+        return {
+            "files": [{"filename": "%s.png" % stem, "png_bytes": bytes(png_bytes)}],
+            "alpha": True,
+            "model_used": "none",
+        }
+
+    async def main():
+        mcp = create_server(
+            config=ServerConfig(project_root=str(tmp_path)),
+            backend_factory=FakeBackend(),
+            postprocess_fn=fake_postprocess,
+        )
+        async with Client(mcp) as client:
+            return await client.call_tool(
+                "generate_app_asset",
+                {
+                    "prompt": "bear",
+                    "category": "avatar",
+                    "save_path": "a/bear.png",
+                    "include_image": True,
+                },
+            )
+
+    res = asyncio.run(main())
+    image_blocks = [c for c in res.content if getattr(c, "type", "") == "image"]
+    assert len(image_blocks) == 1
+    assert base64.b64decode(image_blocks[0].data) == FAKE_PNG
+    structured = res.structured_content or {}
+    assert "image" not in structured

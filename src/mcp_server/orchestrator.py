@@ -37,9 +37,10 @@ C1 v0.2 (2026-10-24): ``format="svg"`` produces a real vector asset via
 C3 vtracer — the requested ``<stem>.svg`` leaf is the only file written.
 ``include_image=True`` attaches the @1x PNG as MCP ``ImageContent`` under
 ``result["image"]`` (opt-in; default keeps the payload small).
-Refine postprocessing uses
-``remove_bg=False`` / ``trim=False`` to preserve the finished parent's
-composition (the parent already passed through the pipeline once).
+C1 v0.5 (2026-10-24): refine gains opt-in ``remove_bg`` (default False —
+the finished parent's composition is preserved; True strips the freshly
+rendered background). Generate gains ``negative`` (passed to the C2
+sampler's negative prompt).
 Refine has no ``overwrite`` param: an existing target (including a
 colliding derived sibling) is refused with ``POLICY_DENIED``.
 """
@@ -120,6 +121,7 @@ _GENERATE_FIELDS = (
     "seamless",
     "palette",
     "symmetry",
+    "negative",
 )
 
 _REFINE_FIELDS = (
@@ -131,6 +133,7 @@ _REFINE_FIELDS = (
     "job_id",
     "workspace",
     "include_image",
+    "remove_bg",
 )
 
 
@@ -200,7 +203,8 @@ class AssetOrchestrator:
     # -- backend adapters -------------------------------------------------
 
     def _submit_txt2img(
-        self, *, prompt: str, width: int, height: int, seed: Any, style: str
+        self, *, prompt: str, width: int, height: int, seed: Any, style: str,
+        negative: Any = None,
     ) -> str:
         """Submit txt2img via the stub method or ONLY the C2 thin helper."""
         if callable(self._txt2img):
@@ -219,6 +223,7 @@ class AssetOrchestrator:
             height=height,
             seed=seed,
             style=style,
+            negative=negative,
         )
 
     def _submit_img2img(
@@ -491,6 +496,7 @@ class AssetOrchestrator:
                 height=args["height"],
                 seed=args["seed"],
                 style=STYLE_TO_BACKEND[args["style_preset"]],
+                negative=args.get("negative"),
             )
             fetched = self._fetch_png_and_seed(backend_job_id)
             seed = args["seed"]
@@ -653,7 +659,7 @@ class AssetOrchestrator:
             try:
                 processed = self._postprocess(
                     bytes(fetched["png_bytes"]),
-                    remove_bg=False,
+                    remove_bg=args.get("remove_bg", False),
                     model="u2net",
                     trim=False,
                     sizes=(1, 2, 3),

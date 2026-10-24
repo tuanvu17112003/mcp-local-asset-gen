@@ -40,6 +40,9 @@ def recolor_to_palette(rgba, colors):
             targets,
             key=lambda t: (t[0] - r) ** 2 + (t[1] - g) ** 2 + (t[2] - b) ** 2,
         )
+        # Quantize rounds near-opaque clusters to 254; snap them back.
+        if a >= 250:
+            a = 255
         new_pal += [nr, ng, nb, a]
     q.putpalette(new_pal, rawmode="RGBA")
     return q.convert("RGBA")

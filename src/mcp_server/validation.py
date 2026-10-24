@@ -426,6 +426,7 @@ def validate_tool_args(
     seamless: Any = False,
     palette: Any = None,
     symmetry: Any = None,
+    negative: Any = None,
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
@@ -530,6 +531,12 @@ def validate_tool_args(
         )
     palette = _check_palette(palette)
     symmetry = _check_symmetry(symmetry)
+    if negative is not None:
+        if not isinstance(negative, str) or not negative.strip():
+            raise ValueError(
+                "INVALID_NEGATIVE: negative must be a non-empty string when given"
+            )
+        negative = negative.strip()
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -550,6 +557,7 @@ def validate_tool_args(
         "seamless": seamless,
         "palette": palette,
         "symmetry": symmetry,
+        "negative": negative,
     }
     return validated
 
@@ -629,6 +637,7 @@ def validate_refine_args(
     job_id: Any = None,
     workspace: Any = "default",
     include_image: Any = False,
+    remove_bg: Any = False,
 ) -> Dict[str, Any]:
     """Validate ``refine_asset`` params; return a normalized args dict.
 
@@ -687,6 +696,12 @@ def validate_refine_args(
             "INVALID_INCLUDE_IMAGE: include_image must be a bool, got %r"
             % (include_image,)
         )
+    if remove_bg is None:
+        remove_bg = False
+    if not isinstance(remove_bg, bool):
+        raise ValueError(
+            "INVALID_REMOVE_BG: remove_bg must be a bool, got %r" % (remove_bg,)
+        )
 
     return {
         "asset_id": asset_id,
@@ -697,4 +712,5 @@ def validate_refine_args(
         "job_id": job_id,
         "workspace": workspace,
         "include_image": include_image,
+        "remove_bg": remove_bg,
     }
