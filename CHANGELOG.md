@@ -30,26 +30,6 @@ Research: `docs/research/improvement-research-2026-10-24.md`.
   orchestrator runs in a worker thread. Best-effort: clients without a
   progressToken see no change; input/output shapes unchanged.
 
-### Changed
-- **Server/package versions bumped `0.1.0 → 0.6.0`** (was stale since
-  v0.1.1 despite five contract revisions; `server_info.version` now
-  reflects them).
-- Server instructions now tell agents the refine strength convention:
-  recolors/restyles need `strength >= 0.7` (schnell img2img barely
-  changes colors below ~0.6 — observed live 2026-10-24); `0.4-0.6` only
-  nudges details.
-- `fastmcp` pin bumped `4.1.0 → 4.1.3` (latest stable; fix sweep, `pip
-  check` clean).
-- **`include_image` now returns a real MCP image content block** (C1
-  v0.5) instead of base64 inside the structured JSON — agents see the
-  asset without megabytes of base64 in the tool output (the structured
-  result no longer carries an `image` key).
-- **`refine_asset` gains `remove_bg`** (default false): opt-in background
-  removal on the refined output (previously always opaque).
-- The `pattern` style template now says "no text, no letters" to curb
-  schnell's text hallucination on empty regions.
-
-### Added
 - **`negative` prompt on `generate_app_asset`** (C1 v0.5): optional
   non-empty string passed through to the sampler (e.g. "no text").
 - **`palette` + `symmetry` on `generate_app_asset`** (P3+P4, C1/C3 v0.4):
@@ -109,6 +89,25 @@ Research: `docs/research/improvement-research-2026-10-24.md`.
   `server_info`.
 
 ### Changed
+
+- **Server/package versions bumped `0.1.0 → 0.6.0`** (was stale since
+  v0.1.1 despite five contract revisions; `server_info.version` now
+  reflects them).
+- Server instructions now tell agents the refine strength convention:
+  recolors/restyles need `strength >= 0.7` (schnell img2img barely
+  changes colors below ~0.6 — observed live 2026-10-24); `0.4-0.6` only
+  nudges details.
+- `fastmcp` pin bumped `4.1.0 → 4.1.3` (latest stable; fix sweep, `pip
+  check` clean).
+- **`include_image` now returns a real MCP image content block** (C1
+  v0.5) instead of base64 inside the structured JSON — agents see the
+  asset without megabytes of base64 in the tool output (the structured
+  result no longer carries an `image` key).
+- **`refine_asset` gains `remove_bg`** (default false): opt-in background
+  removal on the refined output (previously always opaque).
+- The `pattern` style template now says "no text, no letters" to curb
+  schnell's text hallucination on empty regions.
+
 - Server instructions updated for the SVG leaf rule, the automatic
   img2img upload and `include_image`; still under the 4 KB token budget
   (tested).
