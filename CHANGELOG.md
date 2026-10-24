@@ -8,6 +8,13 @@ Copy the relevant entry into the GitHub Release notes when tagging.
 ## [Unreleased]
 
 ### Added
+- **`palette` + `symmetry` on `generate_app_asset`** (P3+P4, C1/C3 v0.4):
+  `palette:["#hex",…]` (2..8) recolors the result to EXACT brand colors
+  (deterministic FASTOCTREE quantize + nearest-color mapping, alpha
+  preserved, applied last so SVG/exports all carry the palette);
+  `symmetry:"mirror-x"|"mirror-quad"|"radial:<n>"` (n 2..12) enforces
+  ornament/kaleidoscope symmetry (applied first in the postprocess
+  chain). Generate-only; `refine_asset` unchanged.
 - **Pattern slice (P1+P2+P7)** for họa tiết / hoa văn (C1/C3 v0.3;
   research `docs/research/pattern-features-research-2026-10-24.md`):
   new `pattern`/`texture` categories (remove_bg defaults false), a
@@ -110,6 +117,8 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   when a client launches the server outside the project).
 
 ### Verified
+- 376 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
+  2026-10-24 — P3/P4 included).
 - 366 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
   2026-10-24 — pattern slice included); live check on RTX 3080: seamless
   floral pattern tile + 2x2 preview generated through the MCP tool surface

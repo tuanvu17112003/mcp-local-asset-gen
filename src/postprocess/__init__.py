@@ -30,6 +30,8 @@ from .rembg_adapter import (
     remove_background,
 )
 from .seamless import export_tile_preview, make_seamless
+from .symmetry import symmetrize
+from .palette import recolor_to_palette
 from .trim import trim_and_pad
 from .vectorize import vectorize_rgba
 
@@ -52,6 +54,8 @@ __all__ = [
     "vectorize_rgba",
     "make_seamless",
     "export_tile_preview",
+    "symmetrize",
+    "recolor_to_palette",
     "process",
     "SUPPORTED_MODELS",
     "DEFAULT_MODEL",

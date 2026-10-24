@@ -41,6 +41,13 @@ STYLE_PRESETS = frozenset({"flat", "clay", "line", "pixel", "pattern"})
 #: pattern tiles live in the 512-1024 band anyway).
 MAX_ASSET_DIM = 1024
 
+#: P3 palette bounds: 2..8 hex colors per call.
+PALETTE_MIN, PALETTE_MAX = 2, 8
+
+#: P4 fixed symmetry modes ("radial:<n>" with n 2..12 is parsed separately).
+SYMMETRY_MODES = frozenset({"mirror-x", "mirror-quad"})
+RADIAL_MIN, RADIAL_MAX = 2, 12
+
 #: User-facing ``check_model`` kinds mapped to ComfyUI loader node class
 #: names the backend ``loader_files`` takes. Explicit ``kind`` maps
 #: through this table; the default (no kind) searches all four nodes.
@@ -337,6 +344,69 @@ def _require_int(name: str, value: Any, *, minimum: int, code: str) -> int:
     return value
 
 
+def _check_palette(palette: Any) -> Any:
+    """Normalize ``palette`` to a list of lowercase ``#rrggbb`` strings.
+
+    ``None`` passes through. Otherwise a list/tuple of 2..8 strings,
+    each ``#rgb`` or ``#rrggbb`` (case-insensitive), else ``ValueError``
+    ``INVALID_PALETTE``.
+    """
+    if palette is None:
+        return None
+    if isinstance(palette, str) or not isinstance(palette, (list, tuple)):
+        raise ValueError(
+            "INVALID_PALETTE: palette must be a list of hex color strings, got %r"
+            % (palette,)
+        )
+    if not PALETTE_MIN <= len(palette) <= PALETTE_MAX:
+        raise ValueError(
+            "INVALID_PALETTE: palette must have %d..%d colors, got %d"
+            % (PALETTE_MIN, PALETTE_MAX, len(palette))
+        )
+    normalized = []
+    for item in palette:
+        if not isinstance(item, str):
+            raise ValueError(
+                "INVALID_PALETTE: each palette color must be a hex string, got %r"
+                % (item,)
+            )
+        digits = item.strip().lstrip("#")
+        if len(digits) == 3:
+            digits = "".join(ch * 2 for ch in digits)
+        if not re.fullmatch(r"[0-9a-fA-F]{6}", digits or ""):
+            raise ValueError(
+                "INVALID_PALETTE: colors must be #rgb or #rrggbb hex, got %r"
+                % (item,)
+            )
+        normalized.append("#" + digits.lower())
+    return normalized
+
+
+def _check_symmetry(symmetry: Any) -> Any:
+    """Validate ``symmetry``; return the normalized string or ``None``.
+
+    Allowed: ``"mirror-x"``, ``"mirror-quad"``, ``"radial:<n>"`` with
+    n = 2..12; else ``ValueError`` ``INVALID_SYMMETRY``.
+    """
+    if symmetry is None:
+        return None
+    if not isinstance(symmetry, str):
+        raise ValueError(
+            "INVALID_SYMMETRY: symmetry must be a string, got %r" % (symmetry,)
+        )
+    value = symmetry.strip().lower()
+    if value in SYMMETRY_MODES:
+        return value
+    if value.startswith("radial:"):
+        raw = value.split(":", 1)[1].strip()
+        if raw.isdigit() and RADIAL_MIN <= int(raw) <= RADIAL_MAX:
+            return f"radial:{int(raw)}"
+    raise ValueError(
+        "INVALID_SYMMETRY: symmetry must be one of %s or radial:<2..12>, got %r"
+        % (sorted(SYMMETRY_MODES), symmetry)
+    )
+
+
 def validate_tool_args(
     prompt: Any,
     category: Any,
@@ -354,6 +424,8 @@ def validate_tool_args(
     workspace: Any = "default",
     include_image: Any = False,
     seamless: Any = False,
+    palette: Any = None,
+    symmetry: Any = None,
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
@@ -456,6 +528,8 @@ def validate_tool_args(
         raise ValueError(
             "INVALID_SEAMLESS: seamless must be a bool, got %r" % (seamless,)
         )
+    palette = _check_palette(palette)
+    symmetry = _check_symmetry(symmetry)
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -474,6 +548,8 @@ def validate_tool_args(
         "workspace": workspace,
         "include_image": include_image,
         "seamless": seamless,
+        "palette": palette,
+        "symmetry": symmetry,
     }
     return validated
 
@@ -508,6 +584,11 @@ __all__ = [
     "KIND_TO_LOADERS",
     "FORMATS",
     "MAX_ASSET_DIM",
+    "PALETTE_MAX",
+    "PALETTE_MIN",
+    "RADIAL_MAX",
+    "RADIAL_MIN",
+    "SYMMETRY_MODES",
     "STYLE_PRESETS",
     "DEFAULT_WIDTH",
     "DEFAULT_HEIGHT",

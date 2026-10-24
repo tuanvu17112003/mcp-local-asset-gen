@@ -53,14 +53,15 @@ SERVER_INSTRUCTIONS = """\
 # asset-gen — local AI asset generation (4 tools)
 
 Purpose: generate app assets (icons, illustrations, avatars, splash,
-seamless patterns/ornaments) with a LOCAL
-ComfyUI + rembg pipeline and save them into the project. No cloud, no uploads.
+seamless patterns/ornaments) with a LOCAL ComfyUI + rembg pipeline. No
+cloud, no uploads.
 
 Tools — call exactly these, with these shapes:
 - generate_app_asset({prompt*, category*, save_path*, width=512,
   height=512, format="png", remove_bg=null, style_preset="flat", seed=null,
   overwrite=false, job_id=null, icon_sizes=null, ico=false,
-  workspace="default", include_image=false, seamless=false}): text-to-image,
+  workspace="default", include_image=false, seamless=false, palette=null,
+  symmetry=null}): text-to-image,
   then transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
   true for icon/avatar. icon_sizes e.g. [32,64] adds -32px/-64px renders;
   ico:true adds a multi-size .ico. format:"svg" traces a vector asset
@@ -69,21 +70,23 @@ Tools — call exactly these, with these shapes:
   see the result. width/height max 1024. seamless:true makes a tileable
   pattern (edge cross-fade + <stem>-tile.png 2x2 preview; pair with
   category pattern/texture + style_preset "pattern").
+  palette:["#hex",…] (2-8) recolors the result to EXACT brand colors;
+  symmetry "mirror-x"|"mirror-quad"|"radial:<n>" (n 2-12) enforces
+  ornament symmetry.
 - refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
   job_id=null, workspace="default", include_image=false}): image-to-image
   tweak; writes a NEW file, never mutates the
   parent (default save is <stem>_refined.png). strength is (0,1]. The
   source PNG is uploaded to ComfyUI automatically.
 - check_model({name*, kind}): is a weight file present in a ComfyUI loader?
-  kind in unet|clip|vae|checkpoint (default: all). Use before generating
-  with an unusual model.
+  kind in unet|clip|vae|checkpoint (default all). Use before generating
 - server_info({}): {backend, comfyui_url, models, version, project_root,
   workspaces, allow_any_path, reachable, queue_depth}. Call FIRST: if
   reachable=false, do not call generate.
 
 Workflow: server_info → (check_model for non-default weights) →
 generate_app_asset → embed the returned asset_path in code → refine_asset
-to iterate (pass seed to reproduce a generation).
+to iterate (pass seed to reproduce).
 
 Rules: YOU choose the output path.
 - save_path may be ABSOLUTE ("C:/proj/src/assets/icon.png") or relative
@@ -101,11 +104,11 @@ Rules: YOU choose the output path.
   workspace) unless configured otherwise — compare once via server_info.
   If your target tree is not an approved root, the human must add it
   (--workspace name=path); you cannot widen the set per call.
-- The result carries asset_path (relative to asset_root), asset_path_absolute
-  (exact location) and asset_root (the approved root owning the file).
-Existing files need overwrite:true. Refine parents must exist; the
-source PNG is uploaded to ComfyUI automatically. At most 2 concurrent
-jobs (excess → QUEUED with job_id; reuse job_id for idempotent retry).
+- Result: asset_path (relative to asset_root), asset_path_absolute
+  (exact location), asset_root (the approved root owning the file).
+Existing files need overwrite:true. Refine parents must exist. At most
+2 concurrent jobs (excess → QUEUED with job_id; reuse job_id for
+idempotent retry).
 
 Errors (machine-readable CODE prefix; fix the cause, don't blindly retry):
 BACKEND_UNAVAILABLE (ComfyUI down — verify via server_info);
@@ -115,7 +118,7 @@ POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
 postprocess-internal opt-in — use the default model).
 
 Limits: localhost ComfyUI only (allow_remote opt-in); 512px default;
-generation is stochastic; postprocess trims/pads and center-crops icons.
+postprocess trims/pads and center-crops icons.
 """
 
 
@@ -269,6 +272,8 @@ def create_server(
         workspace: str = "default",
         include_image: bool = False,
         seamless: bool = False,
+        palette: Optional[Any] = None,
+        symmetry: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate an app asset with local ComfyUI + postprocessing."""
         from .validation import validate_tool_args
@@ -291,6 +296,8 @@ def create_server(
                 workspace=workspace,
                 include_image=include_image,
                 seamless=seamless,
+                palette=palette,
+                symmetry=symmetry,
             )
             return orchestrator.generate(args, project_root)
         except McpServerError as exc:

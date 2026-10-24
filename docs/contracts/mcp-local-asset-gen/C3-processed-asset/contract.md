@@ -105,3 +105,13 @@ Additive to v0.2.
 - A `<stem>-tile.png` entry (2w x 2h 2x2 repeat of the final base, no
   `scale` key) is appended after the `.ico` entry and before the SVG
   entry.
+
+## Addendum v0.4 (2026-10-24) — recolor + symmetry ops
+
+Additive to v0.3. Pipeline order is now: decode/remove_bg →
+`symmetrize` (P4, when `symmetry` set) → `make_seamless` (P2, when
+`seamless`) → trim → `recolor_to_palette` (P3, when `palette` set) →
+2x2 tile preview (seamless only) → `@Nx`/icon/`.ico` → SVG. New modules:
+`postprocess/palette.py` (`recolor_to_palette`, FASTOCTREE quantize +
+nearest-palette mapping, alpha preserved) and `postprocess/symmetry.py`
+(`symmetrize`, pure-geometry mirror/radial, deterministic).

@@ -219,3 +219,24 @@ Additive to v0.2. Research: `docs/research/pattern-features-research-2026-10-24.
 - `width`/`height` are now capped at 1024 (`INVALID_WIDTH` /
   `INVALID_HEIGHT` above) — OOM guard for the 10 GB GGUF-Q4 target;
   schema gains `maximum: 1024`.
+
+## Addendum v0.4 (2026-10-24) — palette recolor + symmetry (P3+P4)
+
+Additive to v0.3. Research: `docs/research/pattern-features-research-2026-10-24.md`.
+
+- New optional input `palette: ["#rgb"|"#rrggbb", ...]` (2..8 colors,
+  case-insensitive, `INVALID_PALETTE` otherwise): after ALL other
+  postprocess steps the result is quantized to `len(colors)` clusters
+  (FASTOCTREE, alpha preserved) and every cluster RGB is replaced by the
+  NEAREST user color — the output contains exactly the brand palette,
+  deterministically. Applies to PNG and SVG (the vector traces the
+  recolored base).
+- New optional input `symmetry`: `"mirror-x"` | `"mirror-quad"` |
+  `"radial:<n>"` (n = 2..12; `INVALID_SYMMETRY` otherwise). Applied FIRST
+  in the postprocess chain (before seamless/trim/palette): mirror flips
+  the left half onto the right (and top onto bottom for quad);
+  `radial:<n>` extracts the center wedge at 3 o'clock spanning 360/n
+  degrees and rotates it n times (kaleidoscope; off-wedge content is
+  discarded by design — faint wedge-boundary seams possible from
+  resampling).
+- Both are generate-only (`refine_asset` unchanged).

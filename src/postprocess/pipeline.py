@@ -19,8 +19,10 @@ from PIL import Image
 
 from .errors import DecodeFailedError
 from .export import export_ico, export_icons, export_scales
+from .palette import recolor_to_palette
 from .rembg_adapter import DEFAULT_MODEL, _require_png_signature, remove_background
 from .seamless import export_tile_preview, make_seamless
+from .symmetry import symmetrize
 from .trim import trim_and_pad
 from .vectorize import vectorize_rgba
 
@@ -40,6 +42,8 @@ def process(
     bria_license_accepted: bool = False,
     mask_provider=None,
     seamless: bool = False,
+    palette=None,
+    symmetry=None,
 ):
     """Run the full postprocess pipeline (pure, no disk writes).
 
@@ -101,17 +105,24 @@ def process(
             ) from exc
         base = img.convert("RGBA")
 
-    # Seamless tiling (P2) runs BEFORE trim and forces trim off: cropping
-    # to the alpha bbox would destroy the tile's periodicity (and pattern
-    # tiles keep their full frame anyway).
+    # Geometry first (P4), then tiling (P2, forces trim off), then trim,
+    # then exact colors (P3) so every exported entry carries the palette.
+    if symmetry:
+        base = symmetrize(base, symmetry)
+
     tile_preview = None
     if seamless:
         base = make_seamless(base)
         trim = False
-        tile_preview = export_tile_preview(base, stem)
 
     if trim:
         base = trim_and_pad(base, pad_px=pad_px)
+
+    if palette:
+        base = recolor_to_palette(base, palette)
+
+    if seamless:
+        tile_preview = export_tile_preview(base, stem)
 
     # Vectorization (C3 v0.2): vectorize=True appends the ``<stem>.svg``
     # entry LAST (after the @Nx/icon/.ico entries); failure raises

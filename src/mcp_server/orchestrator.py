@@ -118,6 +118,8 @@ _GENERATE_FIELDS = (
     "workspace",
     "include_image",
     "seamless",
+    "palette",
+    "symmetry",
 )
 
 _REFINE_FIELDS = (
@@ -509,6 +511,8 @@ class AssetOrchestrator:
                     icon_sizes=args.get("icon_sizes"),
                     ico=args.get("ico", False),
                     seamless=args.get("seamless", False),
+                    palette=args.get("palette"),
+                    symmetry=args.get("symmetry"),
                 )
             except (ValueError, OSError) as exc:
                 # A postprocess rejection must reach the agent with a

@@ -5,7 +5,8 @@ section "Operations / inputs / outputs" exactly:
 
 * ``generate_app_asset({prompt*, category*, save_path*, width?, height?,
   format?, remove_bg?, style_preset?, seed?, overwrite?, job_id?,
-  icon_sizes?, ico?, workspace?, include_image?, seamless?})``
+  icon_sizes?, ico?, workspace?, include_image?, seamless?, palette?,
+  symmetry?})``
   returns ``{asset_path, asset_path_absolute, asset_root, width, height,
   format, seed, style_preset, job_id[, image]}``
 * ``refine_asset({asset_id|asset_path, instruction*, save_path?, strength?, job_id?,
@@ -165,6 +166,25 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                     "image repeats without visible seams; also emits a "
                     "<stem>-tile.png 2x2 preview. Trim is skipped (the "
                     "tile keeps its full frame)."
+                ),
+            },
+            "palette": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 8,
+                "items": {"type": "string"},
+                "description": (
+                    "Recolor the result to EXACTLY these hex colors "
+                    "(\"#rgb\" or \"#rrggbb\", 2..8 items) — deterministic "
+                    "brand-color mapping applied after all other steps."
+                ),
+            },
+            "symmetry": {
+                "type": "string",
+                "description": (
+                    "Enforce symmetry (ornaments/kaleidoscope): "
+                    "\"mirror-x\", \"mirror-quad\" or \"radial:<n>\" "
+                    "(n = 2..12 rotational symmetry)."
                 ),
             },
         },
