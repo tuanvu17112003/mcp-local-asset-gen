@@ -3,6 +3,10 @@
 C2 operation -> HTTP mapping (ComfyUI at ``base_url``, default localhost:8188):
 
 * ``submit``      -> ``POST /prompt`` ``{"prompt": {...}, "client_id"?}`` -> ``prompt_id``
+* ``upload_image``-> ``POST /upload/image`` multipart/form-data
+  (fields ``image`` file + ``overwrite``/``subfolder``/``type``) ->
+  ``{"name","subfolder","type"}`` — the file lands in the ComfyUI
+  ``input/`` dir; LoadImage takes the ``subfolder/name`` value.
 * ``queue_status``-> ``GET /queue`` first, then ``GET /history/{id}`` presence
 * ``poll``        -> ``GET /queue`` once, then ``GET /history/{id}`` each ``poll_interval``
 * ``fetch_outputs``/``fetch_png`` -> parse history ``outputs``; ``GET /view?...`` -> bytes
@@ -16,6 +20,8 @@ never put credentials in query params — this client sends none.
 
 No live ComfyUI is needed for tests: pass any ``transport`` object exposing
 ``post_json(url, body, timeout) -> (status, data)``,
+``post_multipart(url, fields, file_field, file_name, file_bytes, timeout)
+-> (status, data)``,
 ``get_json(url, timeout) -> (status, data)`` and
 ``get_bytes(url, timeout) -> (status, bytes)`` (a fake/stub). Default is a
 stdlib-``urllib`` transport (no third-party dependency). ``sleep`` is also
@@ -30,6 +36,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .errors import (
@@ -47,6 +54,7 @@ _HISTORY_ENDPOINT = "/history"
 _VIEW_ENDPOINT = "/view"
 _INTERRUPT_ENDPOINT = "/interrupt"
 _OBJECT_INFO_ENDPOINT = "/object_info"
+_UPLOAD_ENDPOINT = "/upload/image"
 
 # C2 v0.1.2 read-only introspection allowlist (verified live 2026-10-18).
 ALLOWED_LOADERS = frozenset(
@@ -86,6 +94,45 @@ class _UrllibTransport:
         req = urllib.request.Request(
             url, data=data, headers={"Content-Type": "application/json"}, method="POST"
         )
+        return self._send(req, timeout)
+
+    def post_multipart(
+        self,
+        url: str,
+        fields: Dict[str, str],
+        file_field: str,
+        file_name: str,
+        file_bytes: bytes,
+        timeout: float,
+    ) -> Tuple[int, Any]:
+        """``multipart/form-data`` POST (the shape ComfyUI ``/upload/image`` takes)."""
+        boundary = uuid.uuid4().hex
+        lines: List[str] = []
+        for name, value in fields.items():
+            lines += [
+                f"--{boundary}",
+                f'Content-Disposition: form-data; name="{name}"',
+                "",
+                value,
+            ]
+        lines += [
+            f"--{boundary}",
+            f'Content-Disposition: form-data; name="{file_field}"; '
+            f'filename="{file_name}"',
+            "Content-Type: image/png",
+            "",
+        ]
+        head = ("\r\n".join(lines) + "\r\n").encode("utf-8")
+        tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=head + bytes(file_bytes) + tail,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        return self._send(req, timeout)
+
+    def _send(self, req: Any, timeout: float) -> Tuple[int, Any]:
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.status, self._read_json(resp)
@@ -96,7 +143,7 @@ class _UrllibTransport:
                 payload = {}
             raise _HttpStatusError(exc.code, payload) from exc
         except (urllib.error.URLError, ConnectionError, TimeoutError, socket.error) as exc:
-            raise ComfyUnreachableError(f"ComfyUI unreachable at {url}: {exc}") from exc
+            raise ComfyUnreachableError(f"ComfyUI unreachable at {req.full_url}: {exc}") from exc
 
     def get_json(self, url: str, timeout: float) -> Tuple[int, Any]:
         try:
@@ -458,6 +505,48 @@ class ComfyClient:
             raise JobFailedError(f"/interrupt failed: {exc.body!r}",
                                  job_id=prompt_id, payload=exc.body) from exc
         return True
+
+    def upload_image(
+        self,
+        png_bytes: bytes,
+        *,
+        subfolder: str = "asset-gen",
+        filename: Optional[str] = None,
+        overwrite: bool = False,
+    ) -> Dict[str, Any]:
+        """``POST /upload/image`` the PNG into the ComfyUI ``input/`` dir.
+
+        Returns the server response ``{"name","subfolder","type"}``; the
+        LoadImage node value is ``f"{subfolder}/{name}"`` (or ``name``
+        when ``subfolder`` is empty). ``filename`` defaults to a fresh
+        unique name, so collisions (and the ``overwrite`` decision) never
+        happen on the server side. I/O failures map to
+        ``COMFY_UNREACHABLE``; HTTP errors to ``JOB_FAILED``.
+        """
+        if not isinstance(png_bytes, (bytes, bytearray, memoryview)) or not png_bytes:
+            raise ValueError("png_bytes must be non-empty bytes")
+        name = filename if filename else f"asset-{uuid.uuid4().hex}.png"
+        _status, data = self._transport.post_multipart(
+            self._url(_UPLOAD_ENDPOINT),
+            fields={
+                "overwrite": "true" if overwrite else "false",
+                "subfolder": subfolder,
+                "type": "input",
+            },
+            file_field="image",
+            file_name=name,
+            file_bytes=bytes(png_bytes),
+            timeout=self.request_timeout,
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("name"), str):
+            raise JobFailedError(
+                f"/upload/image gave no file name: {data!r}", payload=data
+            )
+        return {
+            "name": data["name"],
+            "subfolder": str(data.get("subfolder") or ""),
+            "type": str(data.get("type") or "input"),
+        }
 
     def loader_files(self, loader: str) -> Dict[str, List[str]]:
         """``GET /object_info/{loader}`` -> ``{input_name: [filenames]}``.

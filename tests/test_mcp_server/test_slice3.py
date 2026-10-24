@@ -47,8 +47,15 @@ class FakeBackend:
 
 def fake_postprocess(png_bytes, **kwargs):
     stem = kwargs.get("stem", "icon")
+    files = [{"filename": "%s.png" % stem, "png_bytes": bytes(png_bytes)}]
+    if kwargs.get("vectorize"):
+        # C3 v0.2: vectorize=True appends the <stem>.svg entry (the real
+        # pipeline emits it after the @Nx/icon/.ico entries).
+        files.append(
+            {"filename": "%s.svg" % stem, "scale": "svg", "png_bytes": b"<svg/>"}
+        )
     return {
-        "files": [{"filename": "%s.png" % stem, "png_bytes": bytes(png_bytes)}],
+        "files": files,
         "alpha": True,
         "model_used": "none",
     }
@@ -82,19 +89,39 @@ def test_create_server_without_fastmcp_raises_clear_error():
         server.create_server()
 
 
-def test_svg_format_refused_loudly(tmp_path):
-    from src.mcp_server.errors import PostprocessFailedError
+def test_svg_format_writes_only_svg_leaf(tmp_path):
+    """C1 v0.2: format="svg" writes the requested <stem>.svg leaf and nothing else."""
     from src.mcp_server.orchestrator import AssetOrchestrator
     from src.mcp_server.validation import validate_tool_args
 
+    written: dict = {}
     orch = AssetOrchestrator(
-        FakeBackend(), postprocess=fake_postprocess, writer=dict_writer({})
+        FakeBackend(), postprocess=fake_postprocess, writer=dict_writer(written)
     )
     args = validate_tool_args(
-        prompt="bear", category="avatar", save_path="a/bear.png", format="svg"
+        prompt="bear", category="avatar", save_path="a/bear.svg", format="svg"
     )
-    with pytest.raises(PostprocessFailedError, match=r"SVG-DEFERRED"):
-        orch.generate(args, tmp_path)
+    result = orch.generate(args, tmp_path)
+    assert result["format"] == "svg"
+    assert result["asset_path"] == "a/bear.svg"
+    assert sorted(os.path.relpath(p, tmp_path).replace("\\", "/")
+                  for p in written) == ["a/bear.svg"]
+    assert written[str(tmp_path / "a" / "bear.svg")] == b"<svg/>"
+
+
+def test_svg_leaf_with_png_format_refused():
+    """The leaf extension must match the requested format."""
+    from src.mcp_server.errors import PolicyDeniedError
+    from src.mcp_server.validation import validate_tool_args
+
+    with pytest.raises(PolicyDeniedError, match=r"\.png file"):
+        validate_tool_args(
+            prompt="bear", category="avatar", save_path="a/bear.svg", format="png"
+        )
+    with pytest.raises(PolicyDeniedError, match=r"\.svg file"):
+        validate_tool_args(
+            prompt="bear", category="avatar", save_path="a/bear.png", format="svg"
+        )
 
 
 def test_png_format_still_echoed(tmp_path):

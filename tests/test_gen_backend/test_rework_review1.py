@@ -43,7 +43,17 @@ class _StubTransport:
     def __init__(self, history=None):
         self.submitted = {}
         self.interrupt_calls = []
+        self.uploads = []
         self._history = history
+
+    def post_multipart(self, url, fields, file_field, file_name, file_bytes, timeout):
+        if url.endswith("/upload/image"):
+            self.uploads.append(
+                {"fields": dict(fields), "file_name": file_name, "bytes": bytes(file_bytes)}
+            )
+            return 200, {"name": file_name, "subfolder": fields.get("subfolder", ""),
+                         "type": "input"}
+        raise AssertionError("unexpected POST multipart " + url)
 
     def post_json(self, url, body, timeout):
         if url.endswith("/prompt"):
@@ -200,8 +210,21 @@ class SubmitHelpersTest(unittest.TestCase):
         prompt_id = submit_img2img(client, os.path.abspath(TINY_PNG),
                                    "make it red", strength=0.6, seed=42)
         self.assertEqual(prompt_id, "prompt-abc123")
+        # The source PNG is uploaded first; LoadImage consumes the
+        # returned subfolder/name, never the project-local basename.
+        self.assertEqual(len(transport.uploads), 1)
+        upload = transport.uploads[0]
+        self.assertEqual(upload["fields"]["subfolder"], "asset-gen")
+        self.assertEqual(upload["fields"]["type"], "input")
+        self.assertTrue(upload["file_name"].endswith(".png"))
+        with open(TINY_PNG, "rb") as fh:
+            self.assertEqual(upload["bytes"], fh.read())
         submitted = transport.submitted[prompt_id]
         self.assertEqual(submitted["11"]["class_type"], "LoadImage")
+        self.assertEqual(
+            submitted["11"]["inputs"]["image"],
+            "asset-gen/" + upload["file_name"],
+        )
         self.assertEqual(submitted["12"]["class_type"], "VAEEncode")
         self.assertEqual(submitted["7"]["inputs"]["latent_image"], ["12", 0])
         self.assertEqual(submitted["7"]["inputs"]["denoise"], 0.6)

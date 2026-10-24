@@ -1,26 +1,31 @@
-"""JSON-schema dicts for the four C1 tools (contract v0.1.6, Operations).
+"""JSON-schema dicts for the four C1 tools (contract v0.2, Operations).
 
 Plain dicts only — no third-party schema library. Mirrors contract
 section "Operations / inputs / outputs" exactly:
 
 * ``generate_app_asset({prompt*, category*, save_path*, width?, height?,
   format?, remove_bg?, style_preset?, seed?, overwrite?, job_id?,
-  icon_sizes?, ico?, workspace?})``
+  icon_sizes?, ico?, workspace?, include_image?})``
   returns ``{asset_path, asset_path_absolute, asset_root, width, height,
-  format, seed, style_preset, job_id}``
+  format, seed, style_preset, job_id[, image]}``
 * ``refine_asset({asset_id|asset_path, instruction*, save_path?, strength?, job_id?,
-  workspace?})``
-  returns ``{asset_path, asset_path_absolute, asset_root, job_id, parent_job_id}``
+  workspace?, include_image?})``
+  returns ``{asset_path, asset_path_absolute, asset_root, job_id,
+  parent_job_id[, image]}``
 * ``server_info({})`` returns
   ``{backend, comfyui_url, models, version, project_root, workspaces,
   allow_any_path, reachable, queue_depth}``
 * ``check_model({name*, kind?})`` returns ``{available, loader, checked_at}``
 
+C1 v0.2 (2026-10-24): ``format="svg"`` produces a real vector asset (the
+leaf must be ``<stem>.svg``; only that file is written) and
+``include_image=true`` attaches the @1x PNG as an MCP image block under
+the optional ``image`` result key.
 C1 v0.1.6 (user request, 2026-10-22): ``save_path`` may be ABSOLUTE —
 the agent chooses the output location — as long as it lands inside an
 approved root (the project root or a named workspace). Relative paths keep
 resolving under the selected workspace root. The leaf must be
-``<stem>.png`` so the requested path is the written path.
+``<stem>.png`` (or ``<stem>.svg``) so the requested path is the written path.
 
 The contract's golden call is kept as :data:`BEAR_AVATAR_EXAMPLE`, a
 documented valid ``generate_app_asset`` input.
@@ -60,7 +65,7 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                     "(e.g. \"C:/proj/src/assets/icon.png\" — used exactly as "
                     "given, must land inside an approved root) or relative "
                     "(resolved under the selected workspace root). Must name "
-                    "a .png file (the server writes PNG assets); no '..' "
+                    "a .png file (or .svg when format=\"svg\"); no '..' "
                     "traversal; Windows backslashes are accepted."
                 ),
             },
@@ -80,7 +85,11 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                 "type": "string",
                 "enum": ["png", "svg"],
                 "default": "png",
-                "description": "Output format (default png).",
+                "description": (
+                    "Output format (default png). \"svg\" traces a vector "
+                    "asset: the save_path leaf must be <stem>.svg and only "
+                    "that file is written."
+                ),
             },
             "remove_bg": {
                 "type": "boolean",
@@ -129,6 +138,15 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                     "\"default\"); unknown names fail with INVALID_WORKSPACE."
                 ),
             },
+            "include_image": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Attach the @1x PNG as an MCP image block under the "
+                    "optional 'image' result key so the caller can view "
+                    "the asset (default false)."
+                ),
+            },
         },
     },
     "output_schema": {
@@ -154,6 +172,7 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
             "seed": {"type": "integer"},
             "style_preset": {"type": "string"},
             "job_id": {"type": "string"},
+            "image": {"type": "object"},
         },
     },
 }
@@ -214,6 +233,14 @@ REFINE_ASSET_SCHEMA: Dict[str, Any] = {
                     "\"default\"); unknown names fail with INVALID_WORKSPACE."
                 ),
             },
+            "include_image": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Attach the @1x PNG as an MCP image block under the "
+                    "optional 'image' result key (default false)."
+                ),
+            },
         },
     },
     "output_schema": {
@@ -225,6 +252,7 @@ REFINE_ASSET_SCHEMA: Dict[str, Any] = {
             "asset_root": {"type": ["string", "null"]},
             "job_id": {"type": "string"},
             "parent_job_id": {"type": "string"},
+            "image": {"type": "object"},
         },
     },
 }

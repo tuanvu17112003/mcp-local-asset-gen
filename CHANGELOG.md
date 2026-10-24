@@ -8,6 +8,29 @@ Copy the relevant entry into the GitHub Release notes when tagging.
 ## [Unreleased]
 
 ### Added
+- **`format:"svg"` is real vector output** (C1/C3 v0.2; Q4 deferral
+  lifted): `save_path` leaf must be `<stem>.svg` with `format:"svg"`
+  (leaf rule is now format-matched; `.svg` + `format:"png"` and
+  `.png` + `format:"svg"` are refused pre-backend with
+  `POLICY_DENIED INVALID_SAVE_PATH`). For SVG only the `<stem>.svg`
+  file is written — no PNG siblings. Traced with `vtracer==0.6.15`
+  (new runtime dependency in `requirements.txt`; stable PyPI pin, MIT);
+  fully transparent pixels are not traced, so transparent backgrounds
+  carry into the SVG.
+- **`include_image` on `generate_app_asset` and `refine_asset`**
+  (C1 v0.2): opt-in flag (default `false`) that attaches the @1x PNG as
+  an MCP image content block under the result's optional `image` key, so
+  multimodal agents can view the generated asset. Default result shape
+  is unchanged.
+- **`refine_asset` now uploads the source PNG to ComfyUI**
+  (C2 v0.1.3): new `ComfyClient.upload_image` (`POST /upload/image`,
+  stdlib hand-rolled multipart — no new dependency) runs before the
+  img2img submit; the returned `subfolder/name` is wired into LoadImage
+  node "11" under a server-side `asset-gen/` input subfolder with a
+  unique per-upload name. The former precondition — the parent basename
+  had to pre-exist in the ComfyUI `input/` dir — is gone; refining a
+  project asset no longer fails or picks up a stale same-named input
+  file.
 - **The agent chooses the output path** (C1 v0.1.5, user request
   2026-10-22): `save_path` may now be absolute. An absolute path is used
   exactly as given — the asset lands at that path — as long as it lands
@@ -22,6 +45,12 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   `server_info`.
 
 ### Changed
+- Server instructions updated for the SVG leaf rule, the automatic
+  img2img upload and `include_image`; still under the 4 KB token budget
+  (tested).
+- Contracts `docs/contracts/…/{C1,C2,C3}` gained additive addenda
+  (v0.2 / v0.1.3 / v0.2) instead of rewrites; no required key or error
+  code changed.
 - The jail follows the client: with no `--project-root`, the server uses
   its launch directory (the client's workspace for a client that starts the
   server in the project) instead of the MCP server's own checkout.
@@ -68,6 +97,9 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   when a client launches the server outside the project).
 
 ### Verified
+- 353 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
+  2026-10-24 — svg/include_image/upload changes included; `pip check`
+  clean with the added `vtracer==0.6.15` pin).
 - 343 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13).
 - Fresh-install proof (2026-10-23): a brand-new empty venv installing
   `requirements-dev.txt` resolves cleanly (fastmcp 4.1.0, rembg 2.0.85

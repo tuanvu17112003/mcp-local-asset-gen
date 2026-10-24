@@ -42,9 +42,14 @@ root — the project root plus any named workspace (`../../etc/pass.png` →
 chooses the output path: `save_path` may be relative (resolved under the
 selected workspace root) or absolute (used exactly as given when it lands
 inside an approved root; `--allow-any-path` lifts that check). The leaf
-must be a lowercase `.png` file, so the requested path is the written path.
-Results carry `asset_path` (relative to the owning root), `asset_root` (that
-owning root) and `asset_path_absolute`.
+must be a lowercase `.png` file — or `.svg` when `format:"svg"` (the
+vector variant traces the result with `vtracer`; only that file is
+written) — so the requested path is the written path. Results carry
+`asset_path` (relative to the owning root), `asset_root` (that owning
+root) and `asset_path_absolute`; opt-in `include_image:true` also attaches
+the @1x PNG as an MCP image block so the agent can see what it made.
+`refine_asset` uploads the source PNG to ComfyUI automatically
+(`POST /upload/image`); no manual input-dir copy is needed.
 
 ## Prerequisites
 
@@ -113,7 +118,7 @@ ico=true)` → PNG + `@2x/@3x` + `‑32px/‑64px` + `.ico`, all embedded by pat
 ## Verify
 
 ```bash
-pytest tests/ -q   # 343 passed + environment-conditional skips on a full env
+pytest tests/ -q   # 353 passed + environment-conditional skips on a full env
 ```
 
 `server_info` unreachable never errors (`reachable:false`); generation without

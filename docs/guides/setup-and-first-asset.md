@@ -140,8 +140,9 @@ the join rule is `path = output_dir / filename` — the pipeline
 returns the filename leaf and the caller joins it onto the output
 directory. Confirm every path is a project-root-relative POSIX path
 with no `..` segments; anything escaping the root is rejected with
-POLICY_DENIED. (The `.svg` vector variant is post-MVP only and is
-not part of this run.)
+POLICY_DENIED. (The `.svg` vector variant is live since the C1/C3 v0.2
+update: pass `format:"svg"` and a `<stem>.svg` leaf — it traces the result
+with `vtracer`; only that file is written.)
 ### Step 4 — Embed the asset in UserProfile.tsx (3 min)
 
 The sample component already imports the 1x leaf with a relative

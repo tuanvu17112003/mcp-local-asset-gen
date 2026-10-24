@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from postprocess.errors import LicenseRequiredError, VectorizeFailedError
+from postprocess.errors import LicenseRequiredError
 from postprocess.export import export_scales, scale_filename
 from postprocess.pipeline import process
 
@@ -75,9 +75,18 @@ def test_license_gate_through_process():
         )
 
 
-def test_vectorize_true_raises_no_files():
-    with pytest.raises(VectorizeFailedError, match="VECTORIZE_FAILED"):
-        process(_png_bytes(), mask_provider=canned_center_square, vectorize=True)
+def test_vectorize_true_appends_svg_entry():
+    """C3 v0.2: vectorize=True traces the final base to a <stem>.svg entry."""
+    res = process(_png_bytes(), mask_provider=canned_center_square, vectorize=True)
+    svg_entries = [f for f in res["files"] if f["filename"].endswith(".svg")]
+    assert len(svg_entries) == 1
+    entry = svg_entries[0]
+    assert entry["filename"] == "icon.svg"
+    assert entry["scale"] == "svg"
+    svg = entry["png_bytes"].decode("utf-8", "replace")
+    assert "<svg" in svg and "</svg>" in svg
+    # The SVG bytes are NOT a PNG (the png_bytes key is a shared carrier).
+    assert not entry["png_bytes"].startswith(b"\x89PNG")
 
 
 def test_vectorize_default_no_svg():

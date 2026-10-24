@@ -128,7 +128,7 @@ def _is_within(root_key: str, candidate_key: str) -> bool:
     return candidate_key.startswith(prefix)
 
 
-def _split_save_path(save_path: Any) -> Tuple[bool, str]:
+def _split_save_path(save_path: Any, fmt: str = "png") -> Tuple[bool, str]:
     """Validate the shape of ``save_path``; return ``(is_absolute, normalized)``.
 
     Windows separators are folded to ``/``. Absolute paths (POSIX ``/x``,
@@ -196,25 +196,26 @@ def _split_save_path(save_path: Any) -> Tuple[bool, str]:
                 "path component on Windows (alternate data stream), got %r"
                 % (save_path,)
             )
-    _check_asset_leaf(tail, save_path)
+    _check_asset_leaf(tail, save_path, fmt)
     is_absolute = normalized.startswith("/") or bool(_DRIVE_ABS_RE.match(normalized))
     return is_absolute, normalized
 
 
-def _check_asset_leaf(tail: str, save_path: Any) -> None:
+def _check_asset_leaf(tail: str, save_path: Any, fmt: str = "png") -> None:
     """Refuse a leaf the server cannot write under the requested name.
 
-    The pipeline writes PNG bytes named ``<stem>.png`` (plus ``@2x``/``@3x``
-    siblings), so the requested leaf must BE ``<stem>.png`` with a
-    PNG-safe stem — otherwise the written file and the path the tool
-    reports would differ. Refused pre-backend, with a machine-readable
-    code.
+    The pipeline writes files named ``<stem>.<ext>`` where ``ext`` is
+    ``png`` — or ``svg`` when the call requested ``format="svg"`` — so the
+    requested leaf must BE ``<stem>.<ext>`` with a safe stem — otherwise
+    the written file and the path the tool reports would differ. Refused
+    pre-backend, with a machine-readable code.
     """
     stem, dot, ext = tail.rpartition(".")
-    if not dot or ext != "png":
+    if not dot or ext != fmt or fmt not in FORMATS:
         raise PolicyDeniedError(
-            "POLICY_DENIED INVALID_SAVE_PATH: save_path must name a .png file "
-            "(lowercase; the server writes PNG assets), got %r" % (save_path,)
+            "POLICY_DENIED INVALID_SAVE_PATH: save_path must name a .%s file "
+            "(lowercase; matching the requested format=%r), got %r"
+            % (fmt, fmt, save_path)
         )
     if (
         not stem
@@ -229,13 +230,13 @@ def _check_asset_leaf(tail: str, save_path: Any) -> None:
         )
 
 
-def _check_path_shape(save_path: Any) -> str:
+def _check_path_shape(save_path: Any, fmt: str = "png") -> str:
     """Shape check for ``save_path``; returns the normalized path.
 
     Absolute paths pass the shape check (C1 v0.1.5) — they are contained
     later against the approved roots by :func:`resolve_save_path`.
     """
-    _is_absolute, normalized = _split_save_path(save_path)
+    _is_absolute, normalized = _split_save_path(save_path, fmt)
     return normalized
 
 
@@ -245,6 +246,7 @@ def resolve_save_path(
     overwrite: bool = False,
     allowed_roots: Optional[Iterable[Any]] = None,
     allow_any_path: bool = False,
+    fmt: str = "png",
 ) -> Path:
     """Resolve ``save_path`` to an absolute :class:`Path` inside an approved root.
 
@@ -260,7 +262,7 @@ def resolve_save_path(
     traversal, paths that do not name a file, and clobbering an existing
     file unless ``overwrite`` is ``True`` (all ``POLICY_DENIED``).
     """
-    is_absolute, normalized = _split_save_path(save_path)
+    is_absolute, normalized = _split_save_path(save_path, fmt)
     if not isinstance(overwrite, bool):
         raise PolicyDeniedError(
             "POLICY_DENIED INVALID_OVERWRITE: overwrite must be a bool, got %r"
@@ -346,6 +348,7 @@ def validate_tool_args(
     icon_sizes: Any = None,
     ico: Any = False,
     workspace: Any = "default",
+    include_image: Any = False,
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
@@ -367,13 +370,15 @@ def validate_tool_args(
         raise ValueError(
             "INVALID_CATEGORY: must be one of %s, got %r" % (sorted(CATEGORIES), category)
         )
-    save_path = _check_path_shape(save_path)
-    width = _require_int("width", width, minimum=1, code="INVALID_WIDTH")
-    height = _require_int("height", height, minimum=1, code="INVALID_HEIGHT")
     if format not in FORMATS:
         raise ValueError(
             "INVALID_FORMAT: must be one of %s, got %r" % (sorted(FORMATS), format)
         )
+    # The leaf extension must match the requested format (.png or .svg),
+    # so format is validated BEFORE the save_path shape check.
+    save_path = _check_path_shape(save_path, format)
+    width = _require_int("width", width, minimum=1, code="INVALID_WIDTH")
+    height = _require_int("height", height, minimum=1, code="INVALID_HEIGHT")
     if remove_bg is None:
         remove_bg = category in REMOVE_BG_DEFAULT_TRUE
     elif not isinstance(remove_bg, bool):
@@ -425,6 +430,13 @@ def validate_tool_args(
             "INVALID_WORKSPACE: workspace must be a non-empty string, got %r"
             % (workspace,)
         )
+    if include_image is None:
+        include_image = False
+    if not isinstance(include_image, bool):
+        raise ValueError(
+            "INVALID_INCLUDE_IMAGE: include_image must be a bool, got %r"
+            % (include_image,)
+        )
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -441,6 +453,7 @@ def validate_tool_args(
         "icon_sizes": icon_sizes_norm,
         "ico": ico,
         "workspace": workspace,
+        "include_image": include_image,
     }
     return validated
 
@@ -513,6 +526,7 @@ def validate_refine_args(
     strength: Any = DEFAULT_REFINE_STRENGTH,
     job_id: Any = None,
     workspace: Any = "default",
+    include_image: Any = False,
 ) -> Dict[str, Any]:
     """Validate ``refine_asset`` params; return a normalized args dict.
 
@@ -564,6 +578,13 @@ def validate_refine_args(
             "INVALID_WORKSPACE: workspace must be a non-empty string, got %r"
             % (workspace,)
         )
+    if include_image is None:
+        include_image = False
+    if not isinstance(include_image, bool):
+        raise ValueError(
+            "INVALID_INCLUDE_IMAGE: include_image must be a bool, got %r"
+            % (include_image,)
+        )
 
     return {
         "asset_id": asset_id,
@@ -573,4 +594,5 @@ def validate_refine_args(
         "strength": float(strength),
         "job_id": job_id,
         "workspace": workspace,
+        "include_image": include_image,
     }

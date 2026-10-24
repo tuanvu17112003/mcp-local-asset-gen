@@ -74,3 +74,22 @@ conflict, see requirements.txt); no normative requirement changed.)
   interview); freeze at dispatch.
 - Supersedes / acknowledgment: Baselines v0.1.0 (frozen 2026-10-17).
   Affected modules acknowledge at startup; later changes need a new generation.
+
+## Addendum v0.2 (2026-10-24) — vectorization activated
+
+Amends the Q4 PNG-first deferral recorded in v0.1.x.
+
+- `vectorize=True` now APPENDS a `<stem>.svg` entry
+  (`{filename:"<stem>.svg", scale:"svg", png_bytes:<svg bytes>}` — the
+  `png_bytes` key is the shared bytes carrier, same convention as the
+  `.ico` entry) as the LAST file entry, after the `@Nx`/icon/`.ico`
+  entries. Ordering note in the module docstring updated accordingly.
+- Pin: `vtracer==0.6.15` (stable PyPI, legacy `convert_image_to_svg_py`
+  API; the 1.0.0a* `convert_bytes` API is still pre-release — do not pin
+  an alpha). Added to `requirements.txt`; a missing install raises
+  `VECTORIZE_FAILED` at call time (lazy import — PNG-only installs work
+  without it).
+- Tracing mode: `color`/`stacked`/`spline`, `filter_speckle=4`. Probed
+  2026-10-24: fully transparent pixels are NOT traced, so transparent
+  backgrounds carry into the SVG as absence of fill; semi-transparent
+  edge behavior is unprobed (visual check at IC-2).

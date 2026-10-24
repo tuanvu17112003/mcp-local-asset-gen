@@ -59,15 +59,19 @@ Tools — call exactly these, with these shapes:
 - generate_app_asset({prompt*, category*, save_path*, width=512,
   height=512, format="png", remove_bg=null, style_preset="flat", seed=null,
   overwrite=false, job_id=null, icon_sizes=null, ico=false,
-  workspace="default"}): text-to-image,
+  workspace="default", include_image=false}): text-to-image,
   then transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
   true for icon/avatar. icon_sizes e.g. [32,64] adds -32px/-64px renders;
-  ico:true adds a multi-size .ico. format:"svg" is REFUSED (deferred).
-  workspace:"name" (default "default") selects a NAMED server-side root
-  from server_info.workspaces. Unknown name → INVALID_WORKSPACE.
+  ico:true adds a multi-size .ico. format:"svg" traces a vector asset
+  (save_path leaf must be <stem>.svg; only that file is written).
+  include_image:true attaches the @1x PNG as an image block so you can
+  see the result. workspace:"name" (default "default") selects a NAMED
+  server-side root from server_info.workspaces. Unknown name → INVALID_WORKSPACE.
 - refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
-  job_id=null, workspace="default"}): image-to-image tweak; writes a NEW file, never mutates the
-  parent (default save is <stem>_refined.png). strength is (0,1].
+  job_id=null, workspace="default", include_image=false}): image-to-image
+  tweak; writes a NEW file, never mutates the
+  parent (default save is <stem>_refined.png). strength is (0,1]. The
+  source PNG is uploaded to ComfyUI automatically.
 - check_model({name*, kind}): is a weight file present in a ComfyUI loader?
   kind in unet|clip|vae|checkpoint (default: all). Use before generating
   with an unusual model.
@@ -83,40 +87,34 @@ Rules: YOU choose the output path.
 - save_path may be ABSOLUTE ("C:/proj/src/assets/icon.png") or relative
   ("assets/icons/icon.png"). An absolute path is used exactly as given; a
   relative one is resolved under the selected workspace root.
-- The leaf must be a lowercase .png file with a safe stem
-  ([A-Za-z0-9._-]): the server writes PNG assets, so "icon.webp" or
-  "mon icône.png" is refused pre-backend (POLICY_DENIED INVALID_SAVE_PATH).
-- An absolute path must land inside an approved root (the server's
-  project_root or a named workspace — see server_info.workspaces).
-  Containment is checked on the RESOLVED path, so a link pointing outside
-  the root is refused too. Windows backslashes are accepted; ".."
-  traversal, NUL bytes, ':' (NTFS streams) and reserved device names
-  (NUL, COM1, …) are not. --allow-any-path removes every containment
-  check (opt-in, default off).
+- The leaf must be a lowercase .png file (or .svg with format:"svg") with
+  a safe stem ([A-Za-z0-9._-]): the leaf names the written file, so
+  "icon.webp" is refused pre-backend (POLICY_DENIED INVALID_SAVE_PATH).
+- An absolute path must land inside an approved root (project_root or a
+  named workspace — see server_info.workspaces), checked on the RESOLVED
+  path. Windows backslashes are accepted; ".." traversal, NUL bytes,
+  ':' (NTFS streams) and reserved device names (NUL, COM1, …) are not.
+  --allow-any-path removes every containment check (opt-in, default off).
 - The default project_root is the server's start directory (your
   workspace) unless configured otherwise — compare once via server_info.
   If your target tree is not an approved root, the human must add it
   (--workspace name=path); you cannot widen the set per call.
 - The result carries asset_path (relative to asset_root), asset_path_absolute
   (exact location) and asset_root (the approved root owning the file).
-- workspace selects a named server-side root from server_info.workspaces
-  (default "default").
-Existing files need overwrite:true. Refine parents must exist;
-for LIVE img2img the parent basename must pre-exist in ComfyUI's input dir.
-At most 2 concurrent jobs (excess → QUEUED with job_id; reuse job_id for
-idempotent retry).
+Existing files need overwrite:true. Refine parents must exist; the
+source PNG is uploaded to ComfyUI automatically. At most 2 concurrent
+jobs (excess → QUEUED with job_id; reuse job_id for idempotent retry).
 
 Errors (machine-readable CODE prefix; fix the cause, don't blindly retry):
-BACKEND_UNAVAILABLE (ComfyUI down — verify url/port via server_info);
+BACKEND_UNAVAILABLE (ComfyUI down — verify via server_info);
 GENERATION_FAILED (covers JOB_FAILED/JOB_TIMEOUT payloads); POLICY_DENIED
 (bad path/overwrite — fix args); INVALID_* (bad args — rejected
 pre-backend); POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
 postprocess-internal opt-in — use the default model).
 
-Limits: localhost ComfyUI only (allow_remote opt-in exists; default stays
-local); 512px default, backend schnell 1–4 steps (fixed, no steps param);
-generation is stochastic; postprocess trims/pads and center-crops icons.
-Unit tests mock down-backend paths; the live server probes GET /prompt only.
+Limits: localhost ComfyUI only (allow_remote opt-in; default local);
+512px default, schnell 1–4 steps (fixed, no steps param); generation is
+stochastic; postprocess trims/pads and center-crops icons.
 """
 
 
@@ -268,6 +266,7 @@ def create_server(
         icon_sizes: Optional[Any] = None,
         ico: bool = False,
         workspace: str = "default",
+        include_image: bool = False,
     ) -> Dict[str, Any]:
         """Generate an app asset with local ComfyUI + postprocessing."""
         from .validation import validate_tool_args
@@ -288,6 +287,7 @@ def create_server(
                 icon_sizes=icon_sizes,
                 ico=ico,
                 workspace=workspace,
+                include_image=include_image,
             )
             return orchestrator.generate(args, project_root)
         except McpServerError as exc:
@@ -302,6 +302,7 @@ def create_server(
         strength: float = 0.6,
         job_id: Optional[str] = None,
         workspace: str = "default",
+        include_image: bool = False,
     ) -> Dict[str, Any]:
         """Refine an existing asset; creates a new file, never mutates."""
         from .validation import validate_refine_args
@@ -315,6 +316,7 @@ def create_server(
                 strength=strength,
                 job_id=job_id,
                 workspace=workspace,
+                include_image=include_image,
             )
             return orchestrator.refine(args, project_root)
         except McpServerError as exc:

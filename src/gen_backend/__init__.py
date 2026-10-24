@@ -92,15 +92,16 @@ def submit_img2img(client, input_png_path, instruction,
                    width=DEFAULT_SIZE, height=DEFAULT_SIZE,
                    steps=DEFAULT_STEPS, seed=None, model_id=None,
                    style=None, negative=None, client_id=None):
-    """C2 ``submit_img2img`` -> build + inject + img2img-inject -> ``submit``.
+    """C2 ``submit_img2img`` -> build + upload + inject + img2img-inject -> ``submit``.
 
-    Maps to ``img2img.build_img2img_params`` + ``presets.inject_params`` +
-    ``img2img.inject_img2img`` and then ``POST /prompt`` via
-    ``client.submit``. The source PNG is only read (never mutated); its
-    basename is wired into LoadImage node "11". Precondition: that basename
-    must already exist in the ComfyUI input dir — this adapter performs no
-    upload; live `/upload/image` wiring is confirmed only against a live
-    ComfyUI at IC-2. Returns the C2 ``job_id``.
+    Maps to ``img2img.build_img2img_params`` + ``client.upload_image``
+    (``POST /upload/image`` into a server-side ``asset-gen/`` input
+    subfolder) + ``presets.inject_params`` + ``img2img.inject_img2img``
+    and then ``POST /prompt`` via ``client.submit``. The source PNG is
+    only read (never mutated, never left behind in the project); the
+    uploaded ``subfolder/name`` returned by ComfyUI is wired into
+    LoadImage node "11" — the unique server-side name can never collide
+    with a stale input file. Returns the C2 ``job_id``.
     """
     params = build_img2img_params(
         input_png_path, instruction, strength=strength,
@@ -108,9 +109,13 @@ def submit_img2img(client, input_png_path, instruction,
         steps=steps, seed=seed, model_id=model_id,
         style=style, negative=negative,
     )
+    upload = client.upload_image(load_input_bytes(input_png_path))
+    image_value = upload["name"]
+    if upload.get("subfolder"):
+        image_value = f"{upload['subfolder']}/{image_value}"
     workflow = _load_workflow(params["workflow_id"])
     injected = inject_params(workflow, params)
-    prompt_dict = inject_img2img(injected, params)
+    prompt_dict = inject_img2img(injected, params, image_filename=image_value)
     return client.submit(prompt_dict, client_id=client_id)
 
 

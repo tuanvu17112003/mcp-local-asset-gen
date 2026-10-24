@@ -77,11 +77,11 @@ def inject_img2img(prompt_dict, params, image_filename=None):
     Inputs: ``prompt_dict`` is the output of ``presets.inject_params`` (a raw
     workflow also works — ``_meta`` is stripped if present); ``params`` is the
     output of :func:`build_img2img_params`; ``image_filename`` overrides
-    ``params["input_png_name"]`` when given. Never mutates inputs or the
-    source image file (the file is only read to validate it exists; no upload
-    is performed here — the referenced basename must already exist in the
-    ComfyUI input dir, and live `/upload/image` wiring is confirmed only
-    against a live ComfyUI at IC-2).
+    ``params["input_png_name"]`` when given (the caller
+    :func:`gen_backend.submit_img2img` uploads the source via
+    ``POST /upload/image`` and passes the returned ``subfolder/name`` here).
+    Never mutates inputs or the source image file (the file is only read to
+    validate it exists; no upload is performed by this function itself).
 
     Wiring (see workflows/workflow_params.md + IMG2IMG_NODE_MAP): add node
     "11" LoadImage (image = basename) -> node "12" VAEEncode (vae = same

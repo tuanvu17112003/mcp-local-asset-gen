@@ -11,3 +11,6 @@
 fastmcp==4.1.0
 rembg[cpu]==2.0.85
 Pillow==12.3.0
+# SVG vector output (C3 v0.2). Stable PyPI pin: 0.6.x uses the legacy
+# convert_image_to_svg_py API (the 1.0.0a* convert_bytes API is pre-release).
+vtracer==0.6.15

@@ -13,7 +13,8 @@ model downloads, no ``fastmcp`` import):
   helpers return.
 * ``postprocess`` — a callable like ``src.postprocess.pipeline.process``
   (default: the real one, guarded import). Called with
-  ``vectorize=False`` (MVP: ``True`` raises in C3, never yields files).
+  ``vectorize=(format=="svg")`` (C3 v0.2: True appends the ``<stem>.svg``
+  entry; for format=svg the SVG leaf is the only file written).
 * ``writer`` — ``(path, bytes)`` sink; default writes to disk.
 
 Both flows share one shape: validate -> idempotency check (stored
@@ -32,8 +33,11 @@ traversal stays refused everywhere, so containment can never be walked
 out of. Results carry ``asset_path_absolute`` so the caller always
 knows the exact file location.
 
-MVP notes: ``format`` is echoed metadata (PNG bytes; SVG vector output
-is deferred — C3 ``vectorize=True`` raises). Refine postprocessing uses
+C1 v0.2 (2026-10-24): ``format="svg"`` produces a real vector asset via
+C3 vtracer — the requested ``<stem>.svg`` leaf is the only file written.
+``include_image=True`` attaches the @1x PNG as MCP ``ImageContent`` under
+``result["image"]`` (opt-in; default keeps the payload small).
+Refine postprocessing uses
 ``remove_bg=False`` / ``trim=False`` to preserve the finished parent's
 composition (the parent already passed through the pipeline once).
 Refine has no ``overwrite`` param: an existing target (including a
@@ -111,6 +115,7 @@ _GENERATE_FIELDS = (
     "icon_sizes",
     "ico",
     "workspace",
+    "include_image",
 )
 
 _REFINE_FIELDS = (
@@ -121,6 +126,7 @@ _REFINE_FIELDS = (
     "strength",
     "job_id",
     "workspace",
+    "include_image",
 )
 
 
@@ -129,6 +135,18 @@ def _default_writer(path: Any, data: bytes) -> None:
     dest = Path(os.fspath(path))
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(bytes(data))
+
+
+def _image_content(png_bytes: bytes) -> Any:
+    """MCP ``ImageContent`` for the base PNG (lazy fastmcp import).
+
+    Nested dict returns are not auto-converted by FastMCP, so the tool
+    result embeds the converted content object directly (documented
+    nested pattern: ``Image(...).to_image_content()``).
+    """
+    from fastmcp.utilities.types import Image
+
+    return Image(data=png_bytes, format="png").to_image_content()
 
 
 def _root_list(roots: Any) -> list:
@@ -312,12 +330,15 @@ class AssetOrchestrator:
             # strict positive-int checks. C3 v0.1.1 icon PNGs carry string
             # labels ``icon<N>`` (N >= 1, no leading zero); size comes from
             # width/height, so the label is only well-formedness-gated.
+            # C3 v0.2 SVG entries carry the ``svg`` label (no pixel size).
             _is_ico = filename.lower().endswith(".ico") or entry.get("scale") == "ico"
             for _dim in ("width", "height", "scale"):
                 if _dim not in entry:
                     continue
                 _val = entry[_dim]
                 if _dim == "scale" and _is_ico and _val == "ico":
+                    continue
+                if _dim == "scale" and _val == "svg":
                     continue
                 if (
                     _dim == "scale"
@@ -446,14 +467,6 @@ class AssetOrchestrator:
         )
         effective_root = self._effective_root(project_root, args.get("workspace"))
         approved_roots = self._approved_roots(project_root, effective_root)
-        if args["format"] == "svg":
-            # Q4 defers SVG vector output (C3 ``vectorize=True`` raises and
-            # never yields files): refuse loudly instead of echoing svg
-            # metadata beside PNG bytes. ``format`` stays echoed for png.
-            raise PostprocessFailedError(
-                "POSTPROCESS_FAILED SVG-DEFERRED: format='svg' is deferred to "
-                "Q4 (no vector output yet); retry with format='png'"
-            )
         jid = job_id or args.get("job_id") or JobRegistry.new_job_id()
         stored = self._registry.get(jid)
         if stored is not None:
@@ -466,6 +479,7 @@ class AssetOrchestrator:
                 overwrite=args["overwrite"],
                 allowed_roots=approved_roots,
                 allow_any_path=self._allow_any_path(),
+                fmt=args["format"],
             )
             backend_job_id = self._submit_txt2img(
                 prompt=args["prompt"],
@@ -489,7 +503,7 @@ class AssetOrchestrator:
                     trim=True,
                     sizes=(1, 2, 3),
                     stem=stem,
-                    vectorize=False,
+                    vectorize=args["format"] == "svg",
                     icon_sizes=args.get("icon_sizes"),
                     ico=args.get("ico", False),
                 )
@@ -501,8 +515,33 @@ class AssetOrchestrator:
                     "POSTPROCESS_FAILED: postprocess rejected the request: %s"
                     % (exc,)
                 ) from exc
+            files = processed["files"]
+            # include_image attaches the @1x PNG (the pipeline's first
+            # entry) as MCP ImageContent; it exists for every format.
+            base_png = next(
+                (
+                    entry.get("png_bytes")
+                    for entry in files
+                    if isinstance(entry, dict)
+                    and entry.get("filename") == f"{stem}.png"
+                ),
+                None,
+            )
+            if args["format"] == "svg":
+                # format=svg delivers the vector asset only: the requested
+                # leaf is the written file, so PNG siblings are not written.
+                files = [
+                    entry
+                    for entry in files
+                    if isinstance(entry, dict)
+                    and str(entry.get("filename", "")).endswith(".svg")
+                ]
+                if not files:
+                    raise PostprocessFailedError(
+                        "POSTPROCESS_FAILED: postprocess produced no SVG entry"
+                    )
             self._write_files(
-                processed["files"],
+                files,
                 target,
                 approved_roots,
                 allow_any_path=self._allow_any_path(),
@@ -518,6 +557,13 @@ class AssetOrchestrator:
                 "style_preset": args["style_preset"],
                 "job_id": jid,
             }
+            if args.get("include_image"):
+                if base_png is None:
+                    raise PostprocessFailedError(
+                        "POSTPROCESS_FAILED: postprocess produced no base PNG "
+                        "for include_image"
+                    )
+                result["image"] = _image_content(bytes(base_png))
         except McpServerError:
             self._registry.fail(jid)
             raise
@@ -613,6 +659,23 @@ class AssetOrchestrator:
                 "job_id": jid,
                 "parent_job_id": parent_job_id,
             }
+            if args.get("include_image"):
+                stem = Path(save_path.replace("\\", "/")).stem
+                base_png = next(
+                    (
+                        entry.get("png_bytes")
+                        for entry in processed["files"]
+                        if isinstance(entry, dict)
+                        and entry.get("filename") == f"{stem}.png"
+                    ),
+                    None,
+                )
+                if base_png is None:
+                    raise PostprocessFailedError(
+                        "POSTPROCESS_FAILED: postprocess produced no base PNG "
+                        "for include_image"
+                    )
+                result["image"] = _image_content(bytes(base_png))
         except McpServerError:
             self._registry.fail(jid)
             raise

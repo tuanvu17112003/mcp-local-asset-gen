@@ -180,3 +180,24 @@ chain; additive + behavior change; prior acks stand.)
 - Supersedes / affected modules / acknowledgment requirements: Baselines
   v0.1.0 (frozen 2026-10-17). Affected modules acknowledge this generation
   at startup; later changes need a new generation + re-acknowledgment.
+
+## Addendum v0.2 (2026-10-24) — real SVG format + include_image
+
+Additive to v0.1.6; nothing removed.
+
+- `format:"svg"` is now REAL output (Q4 deferral lifted; research
+  `docs/research/asset-gen-completion-research-2026-10-24.md`): the
+  `save_path` leaf must be `<stem>.svg` when `format:"svg"` (leaf rule is
+  format-matched: `.png` for png, `.svg` for svg, still lowercase with the
+  PNG-safe stem). For `format:"svg"` ONLY the `<stem>.svg` file is written
+  — no `@2x`/`@3x`/icon siblings — and the requested leaf is the written
+  path, as before. `format:"svg"` + `.png` leaf (and vice versa) is refused
+  pre-backend with `POLICY_DENIED INVALID_SAVE_PATH`.
+- New optional input `include_image: bool = false` on BOTH
+  `generate_app_asset` and `refine_asset`. When true the result carries an
+  extra `image` key holding an MCP image content block (`type:"image"`,
+  `mimeType:"image/png"`, base64 of the @1x PNG) so multimodal clients can
+  view the asset. Default false keeps result payloads unchanged; the
+  required output keys are unchanged (`image` is optional).
+- Implementation notes: schemas live in `src/mcp_server/schemas.py`
+  (v0.2), server instructions updated; vector payload produced by C3 v0.2.

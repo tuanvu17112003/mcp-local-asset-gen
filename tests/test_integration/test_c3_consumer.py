@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 import pytest
 from PIL import Image
 
-from postprocess.errors import DecodeFailedError, VectorizeFailedError
+from postprocess.errors import DecodeFailedError
 from postprocess.pipeline import process
 
 SRC_SIZE = 128
@@ -74,20 +74,15 @@ def test_canned_consumer_exact_multiples_with_alpha():
     assert base.mode == "RGBA"
 
 
-def test_vectorize_true_raises_and_inline_svg_wellformed():
-    # SVG output is post-MVP deferred: vectorize=True never succeeds.
-    with pytest.raises(VectorizeFailedError, match="VECTORIZE_FAILED"):
-        process(_bear_png(), mask_provider=_opaque_rgba_mask, vectorize=True)
-    res = process(_bear_png(), mask_provider=_opaque_rgba_mask, sizes=(1,))
-    assert all(not f["filename"].endswith(".svg") for f in res["files"])
-    # Honest scope note: only an inline sample is checked for XML
-    # well-formedness; live SVG generation stays out of scope.
-    sample = (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">'
-        '<rect width="16" height="16" fill="#8b5a2b"/></svg>'
-    )
-    root = ET.fromstring(sample)
+def test_vectorize_true_inline_svg_wellformed():
+    """C3 v0.2: vectorize=True traces the base to a well-formed SVG entry."""
+    res = process(_bear_png(), mask_provider=_opaque_rgba_mask, vectorize=True)
+    svg_entries = [f for f in res["files"] if f["filename"].endswith(".svg")]
+    assert len(svg_entries) == 1
+    root = ET.fromstring(svg_entries[0]["png_bytes"].decode("utf-8"))
     assert root.tag.endswith("svg")
+    res_plain = process(_bear_png(), mask_provider=_opaque_rgba_mask, sizes=(1,))
+    assert all(not f["filename"].endswith(".svg") for f in res_plain["files"])
 
 
 def test_strict_probe_jpeg_must_yield_decode_failed():

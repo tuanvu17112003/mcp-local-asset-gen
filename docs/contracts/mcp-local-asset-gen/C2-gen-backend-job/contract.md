@@ -97,3 +97,25 @@ Authoritative owner: PQM0. BASELINED v0.1.2 — controlled amendments only.
 - Supersedes / acknowledgment: v0.1.1 (CR-001, PQM0-approved under 10 GB
   profile authority) supersedes v0.1.0. Backend candidate (frozen on v0.1.0)
   already conforms — ack at integration. Remaining modules launch on v0.1.1.
+
+## Addendum v0.1.3 (2026-10-24) — `/upload/image` closes the img2img precondition
+
+Additive to v0.1.2.
+
+- New client op `upload_image(png_bytes, *, subfolder="asset-gen",
+  filename?=None, overwrite=false)` → `POST /upload/image`,
+  `multipart/form-data`, fields `image` (file) + `overwrite`
+  (`"true"|"false"`) + `subfolder` + `type:"input"`; response
+  `{"name","subfolder","type"}` (verified against third-party write-ups of
+  the current ComfyUI API; re-verify against the installed 0.41.0 at
+  integration). Default `filename` is a fresh unique name, so the server
+  side never collides and `overwrite` stays false.
+- `submit_img2img` now uploads the source PNG first and wires the returned
+  `subfolder/name` into LoadImage node "11" (via the existing
+  `inject_img2img(image_filename=...)` seam). The former precondition —
+  "the parent basename must already exist in the ComfyUI input dir" — is
+  GONE; this closes the open IC-2 gap where refining a project asset
+  failed or used a stale same-named input file.
+- Transport: `_UrllibTransport` gains `post_multipart` (stdlib-only,
+  hand-rolled multipart — no new dependency). Fake transports must expose
+  `post_multipart(url, fields, file_field, file_name, file_bytes, timeout)`.

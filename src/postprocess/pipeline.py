@@ -45,9 +45,10 @@ def process(
     ``remove_bg`` is true (license gate enforced there), else decode
     ``png_bytes`` directly to RGBA (failure -> ``DecodeFailedError``);
     (2) trim via :func:`trim_and_pad` when ``trim`` is true (``trim=False``
-    skips both trim and pad); (3) vectorization via the
-    :func:`vectorize_rgba` stub — ``vectorize=True`` raises
-    ``VectorizeFailedError`` and no files are returned as success;
+    skips both trim and pad); (3) vectorization via
+    :func:`vectorize_rgba` — ``vectorize=True`` appends the
+    ``<stem>.svg`` entry last (a missing vtracer install or a tracing
+    failure raises ``VectorizeFailedError``);
     (4) multi-resolution export via :func:`export_scales`;
     (5) when ``icon_sizes`` is given (C3 v0.1.1), one square icon PNG
     per size via :func:`export_icons`, appended AFTER the ``@Nx``
@@ -97,9 +98,11 @@ def process(
     if trim:
         base = trim_and_pad(base, pad_px=pad_px)
 
-    # Vectorize stub: raises VECTORIZE_FAILED when requested, so the
-    # caller never receives files as a success in that case.
-    vectorize_rgba(base, stem, vectorize=vectorize)
+    # Vectorization (C3 v0.2): vectorize=True appends the ``<stem>.svg``
+    # entry LAST (after the @Nx/icon/.ico entries); failure raises
+    # VectorizeFailedError, so the caller never receives files as a
+    # success in that case.
+    svg_entry = vectorize_rgba(base, stem, vectorize=vectorize)
 
     files = export_scales(base, stem, sizes=sizes)
 
@@ -111,6 +114,8 @@ def process(
         files.extend(export_icons(base, stem, icon_sizes))
     if ico:
         files.append(export_ico(base, stem))
+    if svg_entry is not None:
+        files.append(svg_entry)
 
     if remove_bg:
         alpha = True

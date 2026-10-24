@@ -187,5 +187,69 @@ class ClientMockedHttpTest(unittest.TestCase):
                             for c in transport.interrupt_calls))
 
 
+class _UploadTransport:
+    """Fake for ``upload_image``: records the multipart call, replays a canned response."""
+
+    def __init__(self, response):
+        self.calls = []
+        self._response = response
+
+    def post_multipart(self, url, fields, file_field, file_name, file_bytes, timeout):
+        self.calls.append(
+            {
+                "url": url,
+                "fields": dict(fields),
+                "file_field": file_field,
+                "file_name": file_name,
+                "bytes": bytes(file_bytes),
+            }
+        )
+        return 200, self._response
+
+
+class UploadImageTest(unittest.TestCase):
+    """POST /upload/image wiring, unique default name, response/error mapping."""
+
+    def test_upload_wiring_and_response(self):
+        transport = _UploadTransport(
+            {"name": "asset-x.png", "subfolder": "asset-gen", "type": "input"}
+        )
+        client = ComfyClient(transport=transport)
+        result = client.upload_image(b"\x89PNG\r\n\x1a\n", filename="asset-x.png")
+        self.assertEqual(
+            result,
+            {"name": "asset-x.png", "subfolder": "asset-gen", "type": "input"},
+        )
+        call = transport.calls[0]
+        self.assertTrue(call["url"].endswith("/upload/image"))
+        self.assertEqual(
+            call["fields"],
+            {"overwrite": "false", "subfolder": "asset-gen", "type": "input"},
+        )
+        self.assertEqual(call["file_field"], "image")
+        self.assertEqual(call["bytes"], b"\x89PNG\r\n\x1a\n")
+
+    def test_upload_default_name_is_unique(self):
+        transport = _UploadTransport({"name": "n.png"})
+        client = ComfyClient(transport=transport)
+        client.upload_image(b"\x89PNG\r\n\x1a\n")
+        client.upload_image(b"\x89PNG\r\n\x1a\n")
+        first, second = transport.calls
+        self.assertNotEqual(first["file_name"], second["file_name"])
+        self.assertTrue(first["file_name"].endswith(".png"))
+
+    def test_upload_bad_response_is_job_failed(self):
+        from gen_backend.errors import JobFailedError
+
+        client = ComfyClient(transport=_UploadTransport({"unexpected": True}))
+        with self.assertRaises(JobFailedError):
+            client.upload_image(b"\x89PNG\r\n\x1a\n")
+
+    def test_upload_empty_bytes_refused(self):
+        client = ComfyClient(transport=_UploadTransport({"name": "n.png"}))
+        with self.assertRaises(ValueError):
+            client.upload_image(b"")
+
+
 if __name__ == "__main__":
     unittest.main()
