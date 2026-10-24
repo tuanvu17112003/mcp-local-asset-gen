@@ -29,6 +29,7 @@ from .rembg_adapter import (
     SUPPORTED_MODELS,
     remove_background,
 )
+from .seamless import export_tile_preview, make_seamless
 from .trim import trim_and_pad
 from .vectorize import vectorize_rgba
 
@@ -49,6 +50,8 @@ __all__ = [
     "export_ico",
     "icon_filename",
     "vectorize_rgba",
+    "make_seamless",
+    "export_tile_preview",
     "process",
     "SUPPORTED_MODELS",
     "DEFAULT_MODEL",

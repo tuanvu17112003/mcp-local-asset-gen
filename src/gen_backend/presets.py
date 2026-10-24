@@ -73,6 +73,10 @@ STYLE_PRESETS = {
         "name": "Pixel Art",
         "template": "{prompt}, pixel art, 16-bit retro game sprite style, crisp square pixels",
     },
+    "pattern": {
+        "name": "Seamless Pattern",
+        "template": "{prompt}, seamless repeating pattern, tileable, even distribution, flat motif, consistent scale, full-frame pattern",
+    },
 }
 
 # LoRA wiring stub: no LoRAs bundled, nothing downloaded.

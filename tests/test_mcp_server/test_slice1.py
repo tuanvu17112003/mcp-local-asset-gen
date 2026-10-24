@@ -77,9 +77,11 @@ def test_generate_schema_shape():
         "job_id",
     ]:
         assert field in props, field
-    assert props["category"]["enum"] == ["icon", "illustration", "avatar", "splash"]
+    assert props["category"]["enum"] == [
+        "icon", "illustration", "avatar", "splash", "pattern", "texture",
+    ]
     assert props["format"]["enum"] == ["png", "svg"]
-    assert props["style_preset"]["enum"] == ["flat", "clay", "line", "pixel"]
+    assert props["style_preset"]["enum"] == ["flat", "clay", "line", "pixel", "pattern"]
     out_required = GENERATE_APP_ASSET_SCHEMA["output_schema"]["required"]
     assert out_required == [
         "asset_path",

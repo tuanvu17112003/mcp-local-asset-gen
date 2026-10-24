@@ -114,6 +114,9 @@ Verify: call `server_info` → `{"backend":"comfyui", ..., "reachable":true}`.
 Then generate, e.g. `generate_app_asset(prompt="...",
 category="icon", save_path="assets/icons/app.png", icon_sizes=[32,64],
 ico=true)` → PNG + `@2x/@3x` + `‑32px/‑64px` + `.ico`, all embedded by path.
+Patterns/hoa văn: `category="pattern"` (or `texture`) +
+`style_preset="pattern"` + `seamless=true` → an edge-cross-faded tileable
+image plus a `<stem>-tile.png` 2x2 preview (`width`/`height` max 1024).
 
 ## Verify
 

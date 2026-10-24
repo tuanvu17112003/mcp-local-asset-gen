@@ -5,7 +5,7 @@ section "Operations / inputs / outputs" exactly:
 
 * ``generate_app_asset({prompt*, category*, save_path*, width?, height?,
   format?, remove_bg?, style_preset?, seed?, overwrite?, job_id?,
-  icon_sizes?, ico?, workspace?, include_image?})``
+  icon_sizes?, ico?, workspace?, include_image?, seamless?})``
   returns ``{asset_path, asset_path_absolute, asset_root, width, height,
   format, seed, style_preset, job_id[, image]}``
 * ``refine_asset({asset_id|asset_path, instruction*, save_path?, strength?, job_id?,
@@ -54,8 +54,12 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
             },
             "category": {
                 "type": "string",
-                "enum": ["icon", "illustration", "avatar", "splash"],
-                "description": "Asset category (required).",
+                "enum": ["icon", "illustration", "avatar", "splash", "pattern", "texture"],
+                "description": (
+                    "Asset category (required). pattern/texture keep their "
+                    "full frame (remove_bg defaults false) and pair well "
+                    "with style_preset \"pattern\" and seamless:true."
+                ),
             },
             "save_path": {
                 "type": "string",
@@ -72,14 +76,16 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
             "width": {
                 "type": "integer",
                 "minimum": 1,
+                "maximum": 1024,
                 "default": 512,
-                "description": "Width in px (default 512).",
+                "description": "Width in px (default 512, max 1024).",
             },
             "height": {
                 "type": "integer",
                 "minimum": 1,
+                "maximum": 1024,
                 "default": 512,
-                "description": "Height in px (default 512).",
+                "description": "Height in px (default 512, max 1024).",
             },
             "format": {
                 "type": "string",
@@ -97,9 +103,12 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
             },
             "style_preset": {
                 "type": "string",
-                "enum": ["flat", "clay", "line", "pixel"],
+                "enum": ["flat", "clay", "line", "pixel", "pattern"],
                 "default": "flat",
-                "description": "Style preset (default flat).",
+                "description": (
+                    "Style preset (default flat). \"pattern\" adds "
+                    "seamless/tileable prompt language for hoa văn."
+                ),
             },
             "seed": {
                 "type": "integer",
@@ -144,7 +153,18 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                 "description": (
                     "Attach the @1x PNG as an MCP image block under the "
                     "optional 'image' result key so the caller can view "
-                    "the asset (default false)."
+                    "the asset (default false; seamless tiles attach the "
+                    "2x2 tile preview instead)."
+                ),
+            },
+            "seamless": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Make the result tileable: edge cross-fade so the "
+                    "image repeats without visible seams; also emits a "
+                    "<stem>-tile.png 2x2 preview. Trim is skipped (the "
+                    "tile keeps its full frame)."
                 ),
             },
         },

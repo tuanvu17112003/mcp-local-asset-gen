@@ -8,6 +8,19 @@ Copy the relevant entry into the GitHub Release notes when tagging.
 ## [Unreleased]
 
 ### Added
+- **Pattern slice (P1+P2+P7)** for họa tiết / hoa văn (C1/C3 v0.3;
+  research `docs/research/pattern-features-research-2026-10-24.md`):
+  new `pattern`/`texture` categories (remove_bg defaults false), a
+  `style_preset:"pattern"` seamless/tileable prompt template, and
+  `seamless:true` — an edge cross-fade (feather 32px) makes the result
+  tileable, trim is skipped, and a `<stem>-tile.png` 2x2 preview file is
+  emitted (`include_image` attaches the preview for self-checking seams).
+- **`seamless` on `generate_app_asset`** (C1 v0.3): opt-in tileability
+  via pure-Pillow cross-fade — no ComfyUI-side changes, no new
+  dependency.
+- **`width`/`height` capped at 1024** (P7): `INVALID_WIDTH` /
+  `INVALID_HEIGHT` above the cap (OOM guard for the 10 GB GGUF-Q4
+  target); schema gains `maximum: 1024`.
 - **`format:"svg"` is real vector output** (C1/C3 v0.2; Q4 deferral
   lifted): `save_path` leaf must be `<stem>.svg` with `format:"svg"`
   (leaf rule is now format-matched; `.svg` + `format:"png"` and
@@ -97,6 +110,11 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   when a client launches the server outside the project).
 
 ### Verified
+- 366 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
+  2026-10-24 — pattern slice included); live check on RTX 3080: seamless
+  floral pattern tile + 2x2 preview generated through the MCP tool surface
+  and visually verified (repeat continuous; mild cross-fade ghosting as
+  documented).
 - 353 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
   2026-10-24 — svg/include_image/upload changes included; `pip check`
   clean with the added `vtracer==0.6.15` pin).

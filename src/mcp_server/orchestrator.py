@@ -89,12 +89,13 @@ except Exception:  # pragma: no cover - optional dep; tests/prod inject fakes
 _ICON_SCALE_RE = re.compile(r"^icon([1-9][0-9]*)$")
 
 #: C1 ``style_preset`` -> C2 style id (sibling ``STYLE_PRESETS`` ids:
-#: ``flat``, ``3d-clay``, ``minimal-line``, ``pixel-art``).
+#: ``flat``, ``3d-clay``, ``minimal-line``, ``pixel-art``, ``pattern``).
 STYLE_TO_BACKEND = {
     "flat": "flat",
     "clay": "3d-clay",
     "line": "minimal-line",
     "pixel": "pixel-art",
+    "pattern": "pattern",
 }
 
 #: Models advertised by :meth:`server_info` (C2 ``MODEL_PRESETS`` ids).
@@ -116,6 +117,7 @@ _GENERATE_FIELDS = (
     "ico",
     "workspace",
     "include_image",
+    "seamless",
 )
 
 _REFINE_FIELDS = (
@@ -506,6 +508,7 @@ class AssetOrchestrator:
                     vectorize=args["format"] == "svg",
                     icon_sizes=args.get("icon_sizes"),
                     ico=args.get("ico", False),
+                    seamless=args.get("seamless", False),
                 )
             except (ValueError, OSError) as exc:
                 # A postprocess rejection must reach the agent with a
@@ -518,6 +521,8 @@ class AssetOrchestrator:
             files = processed["files"]
             # include_image attaches the @1x PNG (the pipeline's first
             # entry) as MCP ImageContent; it exists for every format.
+            # A seamless tile prefers the 2x2 preview so the caller can
+            # judge the seams.
             base_png = next(
                 (
                     entry.get("png_bytes")
@@ -527,6 +532,16 @@ class AssetOrchestrator:
                 ),
                 None,
             )
+            if args.get("seamless"):
+                base_png = next(
+                    (
+                        entry.get("png_bytes")
+                        for entry in files
+                        if isinstance(entry, dict)
+                        and entry.get("filename") == f"{stem}-tile.png"
+                    ),
+                    base_png,
+                )
             if args["format"] == "svg":
                 # format=svg delivers the vector asset only: the requested
                 # leaf is the written file, so PNG siblings are not written.

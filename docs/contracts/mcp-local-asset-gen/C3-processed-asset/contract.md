@@ -93,3 +93,15 @@ Amends the Q4 PNG-first deferral recorded in v0.1.x.
   2026-10-24: fully transparent pixels are NOT traced, so transparent
   backgrounds carry into the SVG as absence of fill; semi-transparent
   edge behavior is unprobed (visual check at IC-2).
+
+## Addendum v0.3 (2026-10-24) — seamless tiling + tile preview
+
+Additive to v0.2.
+
+- `process(..., seamless=True)`: after background removal/decode, the base
+  is made wrap-continuous by `postprocess.seamless.make_seamless`
+  (edge cross-fade, feather 32px clamped to side//4, pure Pillow,
+  deterministic, size-preserving) and trim is FORCED OFF.
+- A `<stem>-tile.png` entry (2w x 2h 2x2 repeat of the final base, no
+  `scale` key) is appended after the `.ico` entry and before the SVG
+  entry.

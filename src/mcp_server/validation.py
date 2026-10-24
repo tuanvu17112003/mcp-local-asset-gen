@@ -33,9 +33,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .errors import PolicyDeniedError
 
-CATEGORIES = frozenset({"icon", "illustration", "avatar", "splash"})
+CATEGORIES = frozenset({"icon", "illustration", "avatar", "splash", "pattern", "texture"})
 FORMATS = frozenset({"png", "svg"})
-STYLE_PRESETS = frozenset({"flat", "clay", "line", "pixel"})
+STYLE_PRESETS = frozenset({"flat", "clay", "line", "pixel", "pattern"})
+
+#: Upper bound for width/height (P7 OOM guard for the 10 GB GGUF-Q4 target;
+#: pattern tiles live in the 512-1024 band anyway).
+MAX_ASSET_DIM = 1024
 
 #: User-facing ``check_model`` kinds mapped to ComfyUI loader node class
 #: names the backend ``loader_files`` takes. Explicit ``kind`` maps
@@ -349,6 +353,7 @@ def validate_tool_args(
     ico: Any = False,
     workspace: Any = "default",
     include_image: Any = False,
+    seamless: Any = False,
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
@@ -379,6 +384,14 @@ def validate_tool_args(
     save_path = _check_path_shape(save_path, format)
     width = _require_int("width", width, minimum=1, code="INVALID_WIDTH")
     height = _require_int("height", height, minimum=1, code="INVALID_HEIGHT")
+    if width > MAX_ASSET_DIM:
+        raise ValueError(
+            "INVALID_WIDTH: width must be <= %d, got %r" % (MAX_ASSET_DIM, width)
+        )
+    if height > MAX_ASSET_DIM:
+        raise ValueError(
+            "INVALID_HEIGHT: height must be <= %d, got %r" % (MAX_ASSET_DIM, height)
+        )
     if remove_bg is None:
         remove_bg = category in REMOVE_BG_DEFAULT_TRUE
     elif not isinstance(remove_bg, bool):
@@ -437,6 +450,12 @@ def validate_tool_args(
             "INVALID_INCLUDE_IMAGE: include_image must be a bool, got %r"
             % (include_image,)
         )
+    if seamless is None:
+        seamless = False
+    if not isinstance(seamless, bool):
+        raise ValueError(
+            "INVALID_SEAMLESS: seamless must be a bool, got %r" % (seamless,)
+        )
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -454,6 +473,7 @@ def validate_tool_args(
         "ico": ico,
         "workspace": workspace,
         "include_image": include_image,
+        "seamless": seamless,
     }
     return validated
 
@@ -487,6 +507,7 @@ __all__ = [
     "CHECK_MODEL_LOADERS",
     "KIND_TO_LOADERS",
     "FORMATS",
+    "MAX_ASSET_DIM",
     "STYLE_PRESETS",
     "DEFAULT_WIDTH",
     "DEFAULT_HEIGHT",

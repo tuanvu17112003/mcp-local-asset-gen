@@ -201,3 +201,21 @@ Additive to v0.1.6; nothing removed.
   required output keys are unchanged (`image` is optional).
 - Implementation notes: schemas live in `src/mcp_server/schemas.py`
   (v0.2), server instructions updated; vector payload produced by C3 v0.2.
+
+## Addendum v0.3 (2026-10-24) — pattern slice (P1+P2+P7)
+
+Additive to v0.2. Research: `docs/research/pattern-features-research-2026-10-24.md`.
+
+- Categories gain `pattern` and `texture` (remove_bg defaults FALSE for
+  both — a pattern keeps its full frame; explicit `remove_bg:true` wins).
+- New `style_preset:"pattern"` (maps to C2 style id `pattern`): prompt
+  template adds "seamless repeating pattern, tileable, even distribution…".
+- New optional input `seamless: bool = false`: the postprocess cross-fades
+  the edge bands (feather 32px, clamped to side//4) so the tile wraps
+  continuously, SKIPS trim (cropping would destroy periodicity), and emits
+  an extra `<stem>-tile.png` 2x2 preview file (2w x 2h). With
+  `include_image:true` the attached image block is the TILE PREVIEW (not
+  the @1x base). Non-seamless calls are byte-identical to v0.2 behavior.
+- `width`/`height` are now capped at 1024 (`INVALID_WIDTH` /
+  `INVALID_HEIGHT` above) — OOM guard for the 10 GB GGUF-Q4 target;
+  schema gains `maximum: 1024`.

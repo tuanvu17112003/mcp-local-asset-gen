@@ -20,6 +20,7 @@ from PIL import Image
 from .errors import DecodeFailedError
 from .export import export_ico, export_icons, export_scales
 from .rembg_adapter import DEFAULT_MODEL, _require_png_signature, remove_background
+from .seamless import export_tile_preview, make_seamless
 from .trim import trim_and_pad
 from .vectorize import vectorize_rgba
 
@@ -38,6 +39,7 @@ def process(
     stem: str = "icon",
     bria_license_accepted: bool = False,
     mask_provider=None,
+    seamless: bool = False,
 ):
     """Run the full postprocess pipeline (pure, no disk writes).
 
@@ -57,7 +59,11 @@ def process(
     ``(s, s)``; sizes are core-validated pre-call, so no validation
     happens here; (6) when ``ico`` is true, one multi-size
     ``<stem>.ico`` container via :func:`export_ico`, appended LAST
-    (derived internally even when ``icon_sizes`` is ``None``).
+    (derived internally even when ``icon_sizes`` is ``None``);
+    (7) when ``seamless`` is true (P2): the base is made wrap-continuous
+    via :func:`make_seamless` BEFORE trim (trim is forced off — cropping
+    would destroy periodicity) and a ``<stem>-tile.png`` 2x2 preview is
+    appended after the ``.ico`` entry.
 
     ``alpha`` is defined EXACTLY as: True when the final base image
     has an alpha channel with any transparent pixel (alpha min < 255),
@@ -95,6 +101,15 @@ def process(
             ) from exc
         base = img.convert("RGBA")
 
+    # Seamless tiling (P2) runs BEFORE trim and forces trim off: cropping
+    # to the alpha bbox would destroy the tile's periodicity (and pattern
+    # tiles keep their full frame anyway).
+    tile_preview = None
+    if seamless:
+        base = make_seamless(base)
+        trim = False
+        tile_preview = export_tile_preview(base, stem)
+
     if trim:
         base = trim_and_pad(base, pad_px=pad_px)
 
@@ -114,6 +129,8 @@ def process(
         files.extend(export_icons(base, stem, icon_sizes))
     if ico:
         files.append(export_ico(base, stem))
+    if tile_preview is not None:
+        files.append(tile_preview)
     if svg_entry is not None:
         files.append(svg_entry)
 

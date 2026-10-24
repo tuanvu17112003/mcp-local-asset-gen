@@ -52,21 +52,23 @@ SERVER_NAME = "asset-gen"
 SERVER_INSTRUCTIONS = """\
 # asset-gen — local AI asset generation (4 tools)
 
-Purpose: generate app assets (icons, illustrations, avatars, splash) with a LOCAL
+Purpose: generate app assets (icons, illustrations, avatars, splash,
+seamless patterns/ornaments) with a LOCAL
 ComfyUI + rembg pipeline and save them into the project. No cloud, no uploads.
 
 Tools — call exactly these, with these shapes:
 - generate_app_asset({prompt*, category*, save_path*, width=512,
   height=512, format="png", remove_bg=null, style_preset="flat", seed=null,
   overwrite=false, job_id=null, icon_sizes=null, ico=false,
-  workspace="default", include_image=false}): text-to-image,
+  workspace="default", include_image=false, seamless=false}): text-to-image,
   then transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
   true for icon/avatar. icon_sizes e.g. [32,64] adds -32px/-64px renders;
   ico:true adds a multi-size .ico. format:"svg" traces a vector asset
   (save_path leaf must be <stem>.svg; only that file is written).
   include_image:true attaches the @1x PNG as an image block so you can
-  see the result. workspace:"name" (default "default") selects a NAMED
-  server-side root from server_info.workspaces. Unknown name → INVALID_WORKSPACE.
+  see the result. width/height max 1024. seamless:true makes a tileable
+  pattern (edge cross-fade + <stem>-tile.png 2x2 preview; pair with
+  category pattern/texture + style_preset "pattern").
 - refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
   job_id=null, workspace="default", include_image=false}): image-to-image
   tweak; writes a NEW file, never mutates the
@@ -108,13 +110,12 @@ jobs (excess → QUEUED with job_id; reuse job_id for idempotent retry).
 Errors (machine-readable CODE prefix; fix the cause, don't blindly retry):
 BACKEND_UNAVAILABLE (ComfyUI down — verify via server_info);
 GENERATION_FAILED (covers JOB_FAILED/JOB_TIMEOUT payloads); POLICY_DENIED
-(bad path/overwrite — fix args); INVALID_* (bad args — rejected
-pre-backend); POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
+(bad path/overwrite); INVALID_* (bad args, rejected pre-backend);
+POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
 postprocess-internal opt-in — use the default model).
 
-Limits: localhost ComfyUI only (allow_remote opt-in; default local);
-512px default, schnell 1–4 steps (fixed, no steps param); generation is
-stochastic; postprocess trims/pads and center-crops icons.
+Limits: localhost ComfyUI only (allow_remote opt-in); 512px default;
+generation is stochastic; postprocess trims/pads and center-crops icons.
 """
 
 
@@ -267,6 +268,7 @@ def create_server(
         ico: bool = False,
         workspace: str = "default",
         include_image: bool = False,
+        seamless: bool = False,
     ) -> Dict[str, Any]:
         """Generate an app asset with local ComfyUI + postprocessing."""
         from .validation import validate_tool_args
@@ -288,6 +290,7 @@ def create_server(
                 ico=ico,
                 workspace=workspace,
                 include_image=include_image,
+                seamless=seamless,
             )
             return orchestrator.generate(args, project_root)
         except McpServerError as exc:
