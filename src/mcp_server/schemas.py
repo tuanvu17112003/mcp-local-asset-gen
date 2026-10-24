@@ -199,6 +199,23 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                     "downloads once (~900 MB) on first use."
                 ),
             },
+            "lora": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "Optional LoRA filename in the ComfyUI models/loras/ "
+                    "dir (basename only; the file must already exist — "
+                    "check_model kind 'lora' verifies). Bring your own "
+                    "weights and verify their license."
+                ),
+            },
+            "lora_strength": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 2,
+                "default": 1.0,
+                "description": "LoRA strength (0 < s <= 2; requires lora).",
+            },
         },
     },
     "output_schema": {
@@ -397,6 +414,7 @@ CHECK_MODEL_SCHEMA: Dict[str, Any] = {
                     "clip",
                     "unet",
                     "vae",
+                    "lora",
                 ],
                 "description": "Optional model kind to narrow the search (maps to ComfyUI loader nodes; default: all).",
             },

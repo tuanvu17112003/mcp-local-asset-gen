@@ -119,3 +119,21 @@ Additive to v0.1.2.
 - Transport: `_UrllibTransport` gains `post_multipart` (stdlib-only,
   hand-rolled multipart — no new dependency). Fake transports must expose
   `post_multipart(url, fields, file_field, file_name, file_bytes, timeout)`.
+
+## Addendum v0.2 (2026-10-24) — LoRA injection + WebSocket progress
+
+Additive to v0.1.3.
+
+- `build_txt2img_params` / `submit_txt2img` accept `lora` (basename) and
+  `lora_strength` (0 < s <= 2, default 1.0); `inject_params` inserts node
+  `"13"` `LoraLoaderModelOnly` (`model` = the node-10 model reference) and
+  re-points `ModelSamplingFlux` (node `"10"`) `inputs.model` to
+  `["13", 0]` when `params["lora"]` is set (missing node →
+  `WORKFLOW_NODE_MISMATCH`). Node id "13" avoids the img2img ids 11/12.
+- `ComfyClient.submit` auto-generates the `client_id` (uuid4) when the
+  caller omits it and remembers it (`_last_client_id`); `poll` /
+  `fetch_result` accept optional `on_progress(fraction, node)` fed by
+  ComfyUI WebSocket `progress` frames (`ws://{host}/ws?clientId=...`,
+  filtered by `prompt_id`). `websocket-client==1.9.2` is a new runtime
+  dependency (lazy import). History polling remains the source of truth.
+- `loader_files` allowlist gains `LoraLoaderModelOnly` (`models/loras/`).

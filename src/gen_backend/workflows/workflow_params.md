@@ -47,3 +47,12 @@ ComfyUI) → `12` VAEEncode
 (`vae` = same source as node `8`) → node `7` KSampler takes
 `latent_image=["12",0]` and `denoise=<strength>` (0..1, default 0.6).
 See `img2img.IMG2IMG_NODE_MAP`. Source file is only read, never mutated.
+
+## C2 v0.2 (2026-10-24) — LoRA node "13"
+
+When `params["lora"]` is set, `inject_params()` inserts node `"13"`
+(`LoraLoaderModelOnly`, inputs `lora_name`, `strength_model`, and
+`model` = the ORIGINAL node "10" model reference) and re-points node
+"10" `ModelSamplingFlux` `inputs.model` to `["13", 0]`. Node id "13" is
+chosen to avoid the img2img additions ("11" LoadImage, "12" VAEEncode).
+Without `lora`, the graph is untouched.

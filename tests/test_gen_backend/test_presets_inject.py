@@ -68,10 +68,14 @@ class PresetsTest(unittest.TestCase):
         for style in ("flat", "3d-clay", "minimal-line", "pixel-art"):
             self.assertIn(style, presets.list_styles())
 
-    def test_lora_stub_empty(self):
-        self.assertEqual(presets.LORA_HOOK["loras"], [])
-        self.assertFalse(presets.LORA_HOOK["enabled"])
-        self.assertIn("hook", presets.LORA_HOOK)
+    def test_lora_generic_support_defaults(self):
+        # C2 v0.2: generic LoRA support replaced the stub hook. Default
+        # params carry no LoRA; injection inserts LoraLoaderModelOnly only
+        # when params["lora"] is set (covered in test_v07_features.py).
+        self.assertTrue(hasattr(presets, "LORA_NODE"))
+        self.assertEqual(presets.DEFAULT_LORA_STRENGTH, 1.0)
+        params = presets.build_txt2img_params("a scooter icon")
+        self.assertIsNone(params["lora"])
 
     def test_build_defaults(self):
         params = presets.build_txt2img_params("a scooter icon")

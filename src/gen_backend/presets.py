@@ -79,17 +79,12 @@ STYLE_PRESETS = {
     },
 }
 
-# LoRA wiring stub: no LoRAs bundled, nothing downloaded.
-# Hook: when LoRAs are adopted, insert a LoraLoader node between the model
-# loader (node 1) and ModelSamplingFlux (node 10), routing model+clip through
-# it per entry in "loras" [{name, strength}]; keep this list empty until then.
-LORA_HOOK = {
-    "enabled": False,
-    "loras": [],
-    "node": "LoraLoader",
-    "hook": "insert LoraLoader between node 1 (loader) and node 10 "
-             "(ModelSamplingFlux); pass model+clip through each entry",
-}
+# LoRA wiring (C2 v0.2 / C1 v0.7): generic bring-your-own support. No LoRA
+# weights are bundled or downloaded; ``lora`` names a file the user placed
+# in ComfyUI ``models/loras/``. inject_params() inserts a LoraLoaderModelOnly
+# node between the model loader (node "1") and ModelSamplingFlux (node "10").
+LORA_NODE = "13"
+DEFAULT_LORA_STRENGTH = 1.0
 
 # Nodes inject_params() writes (see workflows/workflow_params.md).
 PROMPT_NODE = "4"
@@ -140,7 +135,8 @@ def build_txt2img_params(prompt, negative=None, workflow_id=DEFAULT_WORKFLOW_ID,
                          width=DEFAULT_SIZE, height=DEFAULT_SIZE,
                          steps=DEFAULT_STEPS, seed=None,
                          model_id=None, style=None,
-                         guidance=FIXED_GUIDANCE):
+                         guidance=FIXED_GUIDANCE,
+                         lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
     """Build and validate txt2img params. Unknown workflow -> UNKNOWN_WORKFLOW.
 
     ``model_id`` defaults to the MODEL_PRESETS id wired to ``workflow_id``
@@ -177,6 +173,7 @@ def build_txt2img_params(prompt, negative=None, workflow_id=DEFAULT_WORKFLOW_ID,
             "MODEL_NOT_WIRED: model_id=%r is a non-default stub with no workflow yet"
             % (model_id,)
         )
+    lora_name, lora_str = _validate_lora(lora, lora_strength)
     return {
         "prompt": _apply_style(str(prompt), style),
         "negative": "" if negative is None else str(negative),
@@ -188,7 +185,37 @@ def build_txt2img_params(prompt, negative=None, workflow_id=DEFAULT_WORKFLOW_ID,
         "model_id": model_id,
         "style": style,
         "guidance": FIXED_GUIDANCE,
+        "lora": lora_name,
+        "lora_strength": lora_str,
     }
+
+
+def _validate_lora(lora, lora_strength):
+    """Validate the optional LoRA pair; return ``(name|None, strength)``.
+
+    ``lora`` must be a plain basename (the file lives in ComfyUI
+    ``models/loras/``); ``lora_strength`` a number in (0, 2] (default 1.0).
+    """
+    if lora is None:
+        return None, DEFAULT_LORA_STRENGTH
+    if not isinstance(lora, str) or not lora.strip():
+        raise ValueError("INVALID_LORA: lora must be a non-empty basename, got %r" % (lora,))
+    cleaned = lora.strip()
+    if ".." in cleaned or "/" in cleaned or "\\" in cleaned:
+        raise ValueError(
+            "INVALID_LORA: lora must be a basename without path traversal, got %r"
+            % (lora,)
+        )
+    strength = DEFAULT_LORA_STRENGTH if lora_strength is None else lora_strength
+    if isinstance(strength, bool) or not isinstance(strength, (int, float)):
+        raise ValueError(
+            "INVALID_LORA_STRENGTH: lora_strength must be a number, got %r" % (strength,)
+        )
+    if not 0 < strength <= 2:
+        raise ValueError(
+            "INVALID_LORA_STRENGTH: lora_strength must be in (0, 2], got %r" % (strength,)
+        )
+    return cleaned, float(strength)
 
 
 def _validate_clip_name(value, label):
@@ -251,6 +278,25 @@ def inject_params(workflow_json, params, clip_name1=None, clip_name2=None):
                 clip_inputs["clip_name1"] = clip_name1
             if "clip_name2" in clip_inputs:
                 clip_inputs["clip_name2"] = clip_name2
+        if params.get("lora"):
+            # C2 v0.2: LoraLoaderModelOnly between the model loader and
+            # ModelSamplingFlux (node "13"; img2img owns ids 11/12).
+            sampler_flux = prompt[GUIDANCE_NODE]
+            model_ref = sampler_flux["inputs"].get("model")
+            if not isinstance(model_ref, list):
+                raise ValueError(
+                    "WORKFLOW_NODE_MISMATCH: node %s has no model input to wire "
+                    "the LoRA through" % (GUIDANCE_NODE,)
+                )
+            prompt[LORA_NODE] = {
+                "class_type": "LoraLoaderModelOnly",
+                "inputs": {
+                    "lora_name": params["lora"],
+                    "strength_model": params.get("lora_strength", DEFAULT_LORA_STRENGTH),
+                    "model": model_ref,
+                },
+            }
+            sampler_flux["inputs"]["model"] = [LORA_NODE, 0]
     except KeyError as exc:
         raise ValueError("WORKFLOW_NODE_MISMATCH: expected node/input missing: %s" % (exc,))
     return prompt

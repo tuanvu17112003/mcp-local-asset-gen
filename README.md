@@ -31,10 +31,10 @@ saved into your project, with the relative path returned for direct embedding:
 
 | Tool | Purpose |
 |---|---|
-| `generate_app_asset` | Text-to-image → postprocess → save; returns the asset path, seed, style; streams MCP progress notifications |
+| `generate_app_asset` | Text-to-image → postprocess → save; returns the asset path, seed, style; streams MCP progress (phases + per-node %) |
 | `refine_asset` | Image-to-image tweak of an existing asset (never mutates the parent) |
 | `cancel_asset_job` | Best-effort interrupt of a running generate/refine (`{cancelled, status}`) |
-| `check_model` | Verify a model file is present in a ComfyUI loader (`unet`/`clip`/`vae`/`checkpoint`) |
+| `check_model` | Verify a model file is present in a ComfyUI loader (`unet`/`clip`/`vae`/`checkpoint`/`lora`) |
 | `server_info` | Backend reachability (`reachable`), queue depth, pinned model list, version |
 
 Path confinement is server-side: tools can only write inside an approved
@@ -122,6 +122,20 @@ Background removal defaults to `u2net`; pass `remove_bg_model="birefnet-general"
 (best edges; ~900 MB one-time download) or `"birefnet-general-lite"` /
 `"isnet-general-use"` on either generation tool.
 
+Optional style LoRA: drop any `.safetensors` into ComfyUI `models/loras/`,
+verify it with `check_model(name=..., kind="lora")`, then pass
+`lora="your_file.safetensors"` (+ `lora_strength`, 0–2) to
+`generate_app_asset` (generate-only). The server bundles no weights —
+check the LoRA's own license before commercial use (most public FLUX style
+LoRAs are trained on FLUX.1-**dev**, which is non-commercial).
+
+Every generated base PNG carries tEXt metadata (`software`, `prompt`,
+`seed`, `job_id`, …) so any later regeneration/refine can be traced back
+to its exact parameters.
+
+CI: `.github/workflows/ci.yml` runs the full CPU-only suite on
+ubuntu + windows × Python 3.11/3.13 for every push/PR.
+
 ## Verify
 
 ```bash
@@ -143,5 +157,5 @@ ComfyUI maps to `BACKEND_UNAVAILABLE` — both covered by tests.
 ## Licenses / third-party notes (not legal advice)
 
 - This repo: **Apache-2.0** (`LICENSE`).
-- Pinned stack: FastMCP (Apache-2.0), `rembg` lib (MIT), Pillow (HPND), FLUX.1-schnell weights (Apache-2.0, commercial OK), FLUX.1-dev weights are **not** used (non-commercial).
+- Pinned stack: FastMCP (Apache-2.0), `rembg` lib (MIT), `websocket-client` (Apache-2.0), Pillow (HPND), FLUX.1-schnell weights (Apache-2.0, commercial OK), FLUX.1-dev weights are **not** used (non-commercial).
 - `bria-rmbg` is an **opt-in only** background-removal model under a **non-commercial** BRIA license — default stays `u2net`. Check `docs/contracts/` for the pinned contract versions.

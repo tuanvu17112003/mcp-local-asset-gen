@@ -57,10 +57,15 @@ KIND_TO_LOADERS = {
     "clip": ["DualCLIPLoader"],
     "vae": ["VAELoader"],
     "checkpoint": ["CheckpointLoaderSimple"],
+    "lora": ["LoraLoaderModelOnly"],
 }
 
 #: Allowlist of user-facing ``check_model`` kinds (keys of KIND_TO_LOADERS).
 CHECK_MODEL_LOADERS = frozenset(KIND_TO_LOADERS)
+
+#: C1 v0.7 LoRA bounds: strength in (0, 2].
+LORA_STRENGTH_MIN, LORA_STRENGTH_MAX = 0.0, 2.0
+DEFAULT_LORA_STRENGTH = 1.0
 
 DEFAULT_WIDTH = 512
 DEFAULT_HEIGHT = 512
@@ -427,6 +432,45 @@ def _check_remove_bg_model(value: Any) -> Any:
     return value
 
 
+def _check_lora(lora: Any, lora_strength: Any) -> Tuple[Optional[str], float]:
+    """Validate the LoRA pair; return ``(name, strength)`` (``None``, 1.0) default.
+
+    ``lora`` must be a plain basename (no separators, no ``..``) naming a
+    file in the ComfyUI ``models/loras/`` dir (C1 v0.7; the server never
+    bundles or downloads weights). ``lora_strength`` is validated only
+    with a ``lora`` and must be a number in (0, 2].
+    """
+    if lora is None:
+        if lora_strength is not None:
+            raise ValueError(
+                "INVALID_LORA: lora_strength given without lora; pass lora first"
+            )
+        return None, DEFAULT_LORA_STRENGTH
+    if not isinstance(lora, str) or not lora.strip():
+        raise ValueError(
+            "INVALID_LORA: lora must be a non-empty string basename, got %r"
+            % (lora,)
+        )
+    cleaned = lora.strip()
+    if ".." in cleaned or "/" in cleaned or "\\" in cleaned:
+        raise ValueError(
+            "INVALID_LORA: lora must be a basename without path traversal, got %r"
+            % (lora,)
+        )
+    strength = DEFAULT_LORA_STRENGTH if lora_strength is None else lora_strength
+    if isinstance(strength, bool) or not isinstance(strength, (int, float)):
+        raise ValueError(
+            "INVALID_LORA_STRENGTH: lora_strength must be a number, got %r"
+            % (strength,)
+        )
+    if not LORA_STRENGTH_MIN < strength <= LORA_STRENGTH_MAX:
+        raise ValueError(
+            "INVALID_LORA_STRENGTH: lora_strength must be in (0, %s], got %r"
+            % (LORA_STRENGTH_MAX, strength)
+        )
+    return cleaned, float(strength)
+
+
 def validate_tool_args(
     prompt: Any,
     category: Any,
@@ -448,6 +492,8 @@ def validate_tool_args(
     symmetry: Any = None,
     negative: Any = None,
     remove_bg_model: Any = None,
+    lora: Any = None,
+    lora_strength: Any = None,
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
@@ -559,6 +605,7 @@ def validate_tool_args(
             )
         negative = negative.strip()
     remove_bg_model = _check_remove_bg_model(remove_bg_model)
+    lora, lora_strength = _check_lora(lora, lora_strength)
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -581,6 +628,8 @@ def validate_tool_args(
         "symmetry": symmetry,
         "negative": negative,
         "remove_bg_model": remove_bg_model,
+        "lora": lora,
+        "lora_strength": lora_strength,
     }
     return validated
 
@@ -629,6 +678,9 @@ __all__ = [
     "REMOVE_BG_DEFAULT_TRUE",
     "REMOVE_BG_MODELS",
     "DEFAULT_REMOVE_BG_MODEL",
+    "DEFAULT_LORA_STRENGTH",
+    "LORA_STRENGTH_MAX",
+    "LORA_STRENGTH_MIN",
     "derive_refined_save_path",
     "resolve_save_path",
     "validate_check_model_args",

@@ -288,3 +288,27 @@ Additive to v0.5. Research: `docs/research/improvement-research-2026-10-24.md`.
   → 3 writing → 4 complete; total=4). Best-effort: clients without a
   progressToken see no change; no input or output shape changed.
 - Tool count is now FIVE (was four); `server_info` output unchanged.
+
+## Addendum v0.7 (2026-10-24) — LoRA, per-node progress, PNG metadata
+
+Additive to v0.6. Research: `docs/research/v06-features-research-2026-10-24.md`.
+
+- New optional inputs on `generate_app_asset` (generate-only): `lora`
+  (plain basename of a file in ComfyUI `models/loras/`; `INVALID_LORA`
+  otherwise — no traversal, no separators) and `lora_strength` (number in
+  (0, 2], default 1.0; `INVALID_LORA_STRENGTH`; requires `lora`). The
+  server bundles no weights; the caller verifies availability via
+  `check_model(name=..., kind="lora")`. `check_model` gains kind `"lora"`
+  (`LoraLoaderModelOnly`).
+- Progress notifications upgrade from phase ticks to per-node detail:
+  during the generating phase the orchestrator emits `1 + fraction`
+  (fraction = ComfyUI WS `progress.value/progress.max` for the job's
+  `prompt_id`, obtained through `ws://{host}/ws?clientId=<submit
+  client_id>`); all other phases keep the integer ticks 0/2/3/4 (total
+  4). Best-effort: any WebSocket failure silently degrades to phases.
+- Every written base `<stem>.png` (PNG format only) now carries tEXt
+  metadata: `software`, `prompt`, `negative`, `category`, `style_preset`,
+  `seed`, `job_id`, `width`, `height`, `remove_bg_model` (refine:
+  `instruction`, `strength`, `parent_job_id`). Lossless re-encode,
+  best-effort (undecodable bytes pass through unchanged). No input or
+  output schema key changed.

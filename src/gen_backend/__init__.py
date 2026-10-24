@@ -69,18 +69,21 @@ def submit_txt2img(client, prompt, workflow_id=DEFAULT_WORKFLOW_ID,
                    width=DEFAULT_SIZE, height=DEFAULT_SIZE,
                    steps=DEFAULT_STEPS, seed=None, model_id=None,
                    style=None, negative=None, guidance=FIXED_GUIDANCE,
-                   client_id=None):
+                   client_id=None, lora=None, lora_strength=None):
     """C2 ``submit_txt2img`` -> build + inject -> ``ComfyClient.submit``.
 
     C2 op ``submit_txt2img({prompt, ...})`` maps to this helper, which calls
     ``presets.build_txt2img_params`` + ``presets.inject_params`` and then
     ``POST /prompt`` via ``client.submit``. Returns the C2 ``job_id``
     (ComfyUI ``prompt_id``). ``model_id`` omitted derives from ``workflow_id``.
+    ``lora``/``lora_strength`` (optional, C2 v0.2) wire a LoraLoaderModelOnly
+    node through the model chain; the file must exist in ``models/loras/``.
     """
     params = build_txt2img_params(
         prompt=prompt, negative=negative, workflow_id=workflow_id,
         width=width, height=height, steps=steps, seed=seed,
         model_id=model_id, style=style, guidance=guidance,
+        lora=lora, lora_strength=lora_strength,
     )
     workflow = _load_workflow(params["workflow_id"])
     prompt_dict = inject_params(workflow, params)

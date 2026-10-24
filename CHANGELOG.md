@@ -5,6 +5,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 Copy the relevant entry into the GitHub Release notes when tagging.
 
+## [Unreleased]
+
+### Added
+- **Per-node progress via the ComfyUI WebSocket** (C1 v0.7 / C2 v0.2;
+  research `docs/research/v06-features-research-2026-10-24.md`):
+  `ComfyClient.submit` auto-generates the `client_id`, and `poll` /
+  `fetch_result` accept an optional `on_progress(fraction, node)` fed by
+  `progress` frames from `ws://{host}/ws?clientId=...` (filtered by
+  `prompt_id`; `/history` polling stays the source of truth). The
+  orchestrator maps the fraction to sub-phase ticks `1 + fraction` on the
+  0..4 scale, so agents now see real percentages while generating.
+  Best-effort: any WS failure degrades to phase ticks. New runtime
+  dependency `websocket-client==1.9.2` (Apache-2.0, pure-Python, lazily
+  imported — an absent install only loses the percentage detail).
+- **Generic LoRA support on `generate_app_asset`** (C1 v0.7 / C2 v0.2):
+  new `lora` (basename of a file in ComfyUI `models/loras/`) and
+  `lora_strength` (0 < s <= 2, default 1.0) inputs; `INVALID_LORA` /
+  `INVALID_LORA_STRENGTH` pre-backend. `inject_params` inserts a
+  `LoraLoaderModelOnly` node (id "13") between the model loader and
+  `ModelSamplingFlux` — verified chain for the GGUF backbone. The server
+  bundles/downloads/recommends NO weights; most public FLUX style LoRAs
+  are dev-trained (non-commercial) — verify the license. `check_model`
+  gains kind `"lora"` (`LoraLoaderModelOnly`). Generate-only; `refine_asset`
+  unchanged.
+- **PNG tEXt provenance metadata** (C1 v0.7): every written base PNG is
+  re-encoded losslessly with `software`, `prompt`, `negative`, `category`,
+  `style_preset`, `seed`, `job_id`, `width`, `height`, `remove_bg_model`
+  (refine: `instruction`, `strength`, `parent_job_id`) — exact parameters
+  travel with the file. Best-effort: undecodable bytes pass through
+  unchanged.
+- **CI** (`.github/workflows/ci.yml`): the full CPU-only suite runs on
+  ubuntu-latest + windows-latest × Python 3.11/3.13 for every push/PR
+  (`pip install -r requirements-dev.txt` → `pip check` → `pytest`).
+- Research doc: `docs/research/v06-features-research-2026-10-24.md`.
+
+### Changed
+- `requirements.txt` gains `websocket-client==1.9.2`.
+- Server instructions updated (lora, check_model kind "lora", PNG
+  metadata note); still under the 4 KB budget (tested).
+
+### Verified
+- 404 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
+  2026-10-24 — WS progress, LoRA, PNG metadata, CI-file tests included;
+  `pip check` clean with `websocket-client==1.9.2`).
+
 ## [v0.6.0] — 2026-10-24 (tag: `v0.6.0`)
 
 Minor release. Contract: C1 v0.1.x → v0.6, C3 v0.2 → v0.5 (additive only).

@@ -19,6 +19,7 @@ EXPECTED_NODES = {
     "DualCLIPLoader",
     "UnetLoaderGGUF",
     "VAELoader",
+    "LoraLoaderModelOnly",
 }
 
 
@@ -67,10 +68,11 @@ def test_kind_to_loaders_contract():
         "clip": ["DualCLIPLoader"],
         "vae": ["VAELoader"],
         "checkpoint": ["CheckpointLoaderSimple"],
+        "lora": ["LoraLoaderModelOnly"],
     }
     assert CHECK_MODEL_LOADERS == frozenset(KIND_TO_LOADERS)
     props = CHECK_MODEL_SCHEMA["input_schema"]["properties"]
-    assert props["kind"]["enum"] == ["checkpoint", "clip", "unet", "vae"]
+    assert props["kind"]["enum"] == ["checkpoint", "clip", "unet", "vae", "lora"]
 
 
 @pytest.mark.parametrize(

@@ -47,6 +47,7 @@ colliding derived sibling) is refused with ``POLICY_DENIED``.
 
 from __future__ import annotations
 
+import inspect
 import os
 import random
 import re
@@ -159,6 +160,32 @@ def _image_content(png_bytes: bytes) -> Any:
     return Image(data=png_bytes, format="png").to_image_content()
 
 
+def _embed_png_metadata(png_bytes: bytes, meta: Dict[str, Any]) -> bytes:
+    """Re-encode a PNG with tEXt metadata chunks (best-effort, C1 v0.7).
+
+    Pixel data is unchanged (Pillow re-encodes losslessly + text chunks).
+    ANY failure (undecodable bytes, missing Pillow, encode error) returns
+    the original bytes — metadata must never break a save.
+    """
+    try:
+        import io
+
+        from PIL import Image
+        from PIL.PngImagePlugin import PngInfo
+
+        img = Image.open(io.BytesIO(png_bytes))
+        img.load()
+        info = PngInfo()
+        for key, value in meta.items():
+            if value is not None:
+                info.add_text(key, str(value))
+        buf = io.BytesIO()
+        img.save(buf, "PNG", pnginfo=info)
+        return buf.getvalue()
+    except Exception:
+        return png_bytes
+
+
 def _root_list(roots: Any) -> list:
     """Normalize a root argument (one path or an iterable of paths) to a list."""
     if roots is None:
@@ -211,12 +238,25 @@ class AssetOrchestrator:
 
     def _submit_txt2img(
         self, *, prompt: str, width: int, height: int, seed: Any, style: str,
-        negative: Any = None,
+        negative: Any = None, lora: Any = None, lora_strength: Any = None,
     ) -> str:
         """Submit txt2img via the stub method or ONLY the C2 thin helper."""
         if callable(self._txt2img):
+            # Only pass optional kwargs the stub actually accepts (strict
+            # fake signatures must keep working).
+            accepted = inspect.signature(self._txt2img).parameters
+            extra = {
+                key: value
+                for key, value in (
+                    ("negative", negative),
+                    ("lora", lora),
+                    ("lora_strength", lora_strength),
+                )
+                if key in accepted
+            }
             return self._txt2img(
-                prompt=prompt, width=width, height=height, seed=seed, style=style
+                prompt=prompt, width=width, height=height, seed=seed, style=style,
+                **extra,
             )
         try:  # shim layout first (src/ on sys.path), cf. server.py dual-try
             from gen_backend import submit_txt2img as submit_helper
@@ -231,6 +271,8 @@ class AssetOrchestrator:
             seed=seed,
             style=style,
             negative=negative,
+            lora=lora,
+            lora_strength=lora_strength,
         )
 
     def _submit_img2img(
@@ -255,9 +297,27 @@ class AssetOrchestrator:
             strength=strength,
         )
 
-    def _fetch_png_and_seed(self, backend_job_id: str) -> Any:
-        """Fetch the backend result; require PNG bytes (else GENERATION_FAILED)."""
-        raw = self._backend.fetch_result(backend_job_id)
+    def _fetch_png_and_seed(
+        self, backend_job_id: str, progress: Optional[Callable[[Any, int, str], None]] = None
+    ) -> Any:
+        """Fetch the backend result; require PNG bytes (else GENERATION_FAILED).
+
+        ``progress`` (optional): when the backend's ``fetch_result`` accepts
+        ``on_progress`` (the real ComfyClient; fakes keep their 1-arg
+        signature), WS per-node fractions flow through as sub-phase ticks
+        ``1 + fraction`` on the 0..4 scale.
+        """
+        fetch = self._backend.fetch_result
+        kwargs: Dict[str, Any] = {}
+        if progress is not None and "on_progress" in inspect.signature(fetch).parameters:
+            def _on_fraction(fraction: Any, node: Optional[str]) -> None:
+                frac = max(0.0, min(float(fraction), 1.0))
+                pct = int(round(frac * 100))
+                where = f" (node {node})" if node else ""
+                self._emit(progress, 1.0 + frac, 4, f"generating on ComfyUI: {pct}%{where}")
+
+            kwargs["on_progress"] = _on_fraction
+        raw = fetch(backend_job_id, **kwargs)
         if not isinstance(raw, dict) or not isinstance(
             raw.get("png_bytes"), (bytes, bytearray)
         ):
@@ -566,10 +626,12 @@ class AssetOrchestrator:
                 seed=args["seed"],
                 style=STYLE_TO_BACKEND[args["style_preset"]],
                 negative=args.get("negative"),
+                lora=args.get("lora"),
+                lora_strength=args.get("lora_strength"),
             )
             self._track_job(jid, backend_job_id)
             self._emit(progress, 1, 4, "generating on ComfyUI (job %s)" % backend_job_id)
-            fetched = self._fetch_png_and_seed(backend_job_id)
+            fetched = self._fetch_png_and_seed(backend_job_id, progress)
             self._untrack_job(jid)
             seed = args["seed"]
             if seed is None:
@@ -638,6 +700,30 @@ class AssetOrchestrator:
                     raise PostprocessFailedError(
                         "POSTPROCESS_FAILED: postprocess produced no SVG entry"
                     )
+            if args["format"] == "png":
+                # C1 v0.7: the base PNG carries its provenance as tEXt chunks
+                # (best-effort; re-encode is lossless).
+                for entry in files:
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("filename") == f"{stem}.png"
+                    ):
+                        entry["png_bytes"] = _embed_png_metadata(
+                            bytes(entry["png_bytes"]),
+                            {
+                                "software": f"mcp-local-asset-gen/{SERVER_VERSION}",
+                                "prompt": args["prompt"],
+                                "negative": args.get("negative"),
+                                "category": args["category"],
+                                "style_preset": args["style_preset"],
+                                "seed": seed,
+                                "job_id": jid,
+                                "width": args["width"],
+                                "height": args["height"],
+                                "remove_bg_model": args["remove_bg_model"],
+                            },
+                        )
+                        break
             self._write_files(
                 files,
                 target,
@@ -737,7 +823,7 @@ class AssetOrchestrator:
             )
             self._track_job(jid, backend_job_id)
             self._emit(progress, 1, 4, "refining on ComfyUI (job %s)" % backend_job_id)
-            fetched = self._fetch_png_and_seed(backend_job_id)
+            fetched = self._fetch_png_and_seed(backend_job_id, progress)
             self._untrack_job(jid)
             stem = Path(save_path.replace("\\", "/")).stem
             self._emit(progress, 2, 4, "postprocessing (remove_bg, exports)")
@@ -756,6 +842,23 @@ class AssetOrchestrator:
                     "POSTPROCESS_FAILED: postprocess rejected the request: %s"
                     % (exc,)
                 ) from exc
+            for entry in processed["files"]:
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("filename") == f"{stem}.png"
+                ):
+                    entry["png_bytes"] = _embed_png_metadata(
+                        bytes(entry["png_bytes"]),
+                        {
+                            "software": f"mcp-local-asset-gen/{SERVER_VERSION}",
+                            "instruction": args["instruction"],
+                            "strength": args["strength"],
+                            "parent_job_id": parent_job_id,
+                            "job_id": jid,
+                            "remove_bg_model": args["remove_bg_model"],
+                        },
+                    )
+                    break
             self._write_files(
                 processed["files"],
                 target,

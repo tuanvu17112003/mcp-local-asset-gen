@@ -55,16 +55,67 @@ _VIEW_ENDPOINT = "/view"
 _INTERRUPT_ENDPOINT = "/interrupt"
 _OBJECT_INFO_ENDPOINT = "/object_info"
 _UPLOAD_ENDPOINT = "/upload/image"
+_WS_ENDPOINT = "/ws"
 
 # C2 v0.1.2 read-only introspection allowlist (verified live 2026-10-18).
+# v0.7 adds "lora" (LoraLoaderModelOnly -> models/loras/).
 ALLOWED_LOADERS = frozenset(
-    {"UnetLoaderGGUF", "DualCLIPLoader", "VAELoader", "CheckpointLoaderSimple"}
+    {"UnetLoaderGGUF", "DualCLIPLoader", "VAELoader", "CheckpointLoaderSimple",
+     "LoraLoaderModelOnly"}
 )
 
 SUBMIT_TIMEOUT_S = 5.0  # contract: submit timeout 5 s
 REQUEST_TIMEOUT_S = 10.0  # non-submit single-request timeout
+_WS_HANDSHAKE_TIMEOUT_S = 3.0
+_WS_FRAME_TIMEOUT_S = 0.2  # drain window per poll iteration
 
 JobStatus = str  # one of queued|running|completed|error|not_found
+
+
+def _drain_progress_ws(ws: Any, prompt_id: str, on_progress: Callable[[float, Optional[str]], None]) -> bool:
+    """Drain pending WebSocket text frames; return False when the WS is dead.
+
+    Only ``progress`` frames matching ``prompt_id`` reach ``on_progress``
+    as ``(value/max, node)``. Binary (preview) frames, other message
+    types, other prompts and malformed JSON are ignored. Any transport
+    error or a raising callback reports the WS as dead (caller drops it —
+    progress is best-effort, never breaks polling).
+    """
+    import websocket  # lazy: only when a caller asked for WS progress
+
+    while True:
+        try:
+            frame = ws.recv()
+        except websocket.WebSocketTimeoutException:
+            return True  # drain window empty; WS healthy
+        except Exception:
+            return False  # transport error: drop the socket
+        if not isinstance(frame, str):
+            continue  # binary preview frame
+        try:
+            msg = json.loads(frame)
+        except ValueError:
+            continue
+        data = msg.get("data") if isinstance(msg, dict) else None
+        if not isinstance(data, dict) or msg.get("type") != "progress":
+            continue
+        if data.get("prompt_id") != prompt_id:
+            continue
+        value, maximum = data.get("value"), data.get("max")
+        if (
+            isinstance(value, (int, float))
+            and isinstance(maximum, (int, float))
+            and maximum > 0
+        ):
+            node = data.get("node")
+            try:
+                on_progress(
+                    min(float(value) / float(maximum), 1.0),
+                    node if isinstance(node, str) else None,
+                )
+            except Exception:
+                return False
+    return True
 
 
 class _HttpStatusError(Exception):
@@ -261,6 +312,7 @@ class ComfyClient:
         self._transport = transport or _UrllibTransport()
         self._sleep = sleep
         self._clock = clock
+        self._last_client_id: Optional[str] = None
 
     # -- low-level helpers -------------------------------------------------
     def _url(self, path: str) -> str:
@@ -277,8 +329,11 @@ class ComfyClient:
         if not isinstance(prompt_dict, dict) or not prompt_dict:
             raise ValueError("prompt_dict must be a non-empty API-format workflow dict")
         body: Dict[str, Any] = {"prompt": prompt_dict}
-        if client_id:
-            body["client_id"] = client_id
+        if not client_id:
+            # Auto id binds this submit to the poll-time progress WS (C1 v0.7).
+            client_id = uuid.uuid4().hex
+        body["client_id"] = client_id
+        self._last_client_id = client_id
         try:
             _status, data = self._transport.post_json(
                 self._url(_PROMPT_ENDPOINT), body, self.submit_timeout
@@ -346,9 +401,19 @@ class ComfyClient:
             return "completed"
         return "running"  # entry exists but no outputs yet
 
-    def poll(self, prompt_id: str) -> Dict[str, Any]:
+    def poll(
+        self,
+        prompt_id: str,
+        on_progress: Optional[Callable[[float, Optional[str]], None]] = None,
+    ) -> Dict[str, Any]:
         """``GET /queue`` once (fail fast on unknown id), then ``GET /history/{id}``
         every ``poll_interval`` up to ``max_wait_s``; return the history payload.
+
+        ``on_progress`` (optional, C1 v0.7): when given and a WebSocket can
+        be opened for the submit's ``client_id``, ``progress`` frames for
+        this ``prompt_id`` reach it as ``(value/max, node)`` each poll
+        iteration. Best-effort: import/transport failures silently skip WS
+        progress; ``/history`` polling stays the source of truth.
 
         Raises ``JOB_FAILED`` with the ComfyUI error payload, or ``JOB_TIMEOUT``
         (after best-effort ``POST /interrupt``) on expiry.
@@ -358,35 +423,62 @@ class ComfyClient:
                                  job_id=prompt_id)
         deadline = self._clock() + self.max_wait_s
         history_url = self._url(f"{_HISTORY_ENDPOINT}/{urllib.parse.quote(prompt_id)}")
-        last: Any = None
-        while True:
+        ws = None
+        if on_progress is not None and self._last_client_id:
             try:
-                _status, last = self._transport.get_json(history_url, self.request_timeout)
-            except _HttpStatusError as exc:
-                if exc.status != 404:
-                    raise JobFailedError(
-                        f"/history failed: {exc.body!r}", job_id=prompt_id, payload=exc.body
-                    ) from exc
-            entry = _select_history_entry(last, prompt_id)
-            if entry:
-                status = entry.get("status") or {}
-                if str(status.get("status_str", "")).lower() == "error" or status.get("error"):
-                    raise JobFailedError(
-                        f"ComfyUI job failed: {status!r}", job_id=prompt_id, payload=status
-                    )
-                if entry.get("outputs") or status.get("completed"):
-                    return last if isinstance(last, dict) else {prompt_id: entry}
-            if self._clock() >= deadline:
-                try:
-                    self.cancel(prompt_id=prompt_id)
-                except Exception:
-                    pass  # best-effort interrupt; timeout is raised regardless
-                raise JobTimeoutError(
-                    f"Job {prompt_id!r} not complete after {self.max_wait_s:g}s; "
-                    "interrupt attempted, record job_id for resume.",
-                    job_id=prompt_id,
+                import websocket  # lazy: only when a caller asked for progress
+
+                netloc = urllib.parse.urlsplit(self.base_url).netloc
+                ws = websocket.create_connection(
+                    f"ws://{netloc}{_WS_ENDPOINT}?clientId="
+                    f"{urllib.parse.quote(self._last_client_id)}",
+                    timeout=_WS_HANDSHAKE_TIMEOUT_S,
                 )
-            self._sleep(self.poll_interval)
+                ws.settimeout(_WS_FRAME_TIMEOUT_S)
+            except Exception:
+                ws = None  # no WS -> poll-only, phase ticks still flow
+        try:
+            last: Any = None
+            while True:
+                try:
+                    _status, last = self._transport.get_json(history_url, self.request_timeout)
+                except _HttpStatusError as exc:
+                    if exc.status != 404:
+                        raise JobFailedError(
+                            f"/history failed: {exc.body!r}", job_id=prompt_id, payload=exc.body
+                        ) from exc
+                if ws is not None and not _drain_progress_ws(ws, prompt_id, on_progress):
+                    try:
+                        ws.close()
+                    except Exception:
+                        pass
+                    ws = None
+                entry = _select_history_entry(last, prompt_id)
+                if entry:
+                    status = entry.get("status") or {}
+                    if str(status.get("status_str", "")).lower() == "error" or status.get("error"):
+                        raise JobFailedError(
+                            f"ComfyUI job failed: {status!r}", job_id=prompt_id, payload=status
+                        )
+                    if entry.get("outputs") or status.get("completed"):
+                        return last if isinstance(last, dict) else {prompt_id: entry}
+                if self._clock() >= deadline:
+                    try:
+                        self.cancel(prompt_id=prompt_id)
+                    except Exception:
+                        pass  # best-effort interrupt; timeout is raised regardless
+                    raise JobTimeoutError(
+                        f"Job {prompt_id!r} not complete after {self.max_wait_s:g}s; "
+                        "interrupt attempted, record job_id for resume.",
+                        job_id=prompt_id,
+                    )
+                self._sleep(self.poll_interval)
+        finally:
+            if ws is not None:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def fetch_outputs(history_payload: Dict[str, Any], prompt_id: Optional[str] = None) -> List[Dict[str, str]]:
@@ -437,10 +529,16 @@ class ComfyClient:
         return bytes(data)
 
     def fetch_result(
-        self, prompt_id: str, request_echo: Optional[Dict[str, Any]] = None
+        self,
+        prompt_id: str,
+        request_echo: Optional[Dict[str, Any]] = None,
+        on_progress: Optional[Callable[[float, Optional[str]], None]] = None,
     ) -> Dict[str, Any]:
         """``poll`` + download first image -> ``{png_bytes, width, height, seed,
         model_id, elapsed_s}``.
+
+        ``on_progress`` (optional, C1 v0.7) forwards WS per-node progress
+        from :meth:`poll` as ``(value/max, node)``; best-effort.
 
         Meta source precedence (documented per contract): (1) history
         ``outputs`` node metadata, (2) history entry ``prompt`` echo
@@ -453,7 +551,7 @@ class ComfyClient:
         client-measured wall time around ``poll`` + download.
         """
         start = self._clock()
-        history = self.poll(prompt_id)
+        history = self.poll(prompt_id, on_progress=on_progress)
         entry = _select_history_entry(history, prompt_id) or {}
         refs = self.fetch_outputs(history, prompt_id)
         if not refs:
