@@ -261,3 +261,30 @@ Additive to v0.4.
 - The `pattern` style template now includes "no text, no letters,
   no typography" (mitigates schnell's text hallucination on empty
   regions).
+
+## Addendum v0.6 (2026-10-24) — cancel_asset_job; remove_bg_model; progress
+
+Additive to v0.5. Research: `docs/research/improvement-research-2026-10-24.md`.
+
+- New tool `cancel_asset_job({job_id*})` → `{job_id, cancelled, status}`:
+  best-effort `POST /interrupt` for a job whose backend submit succeeded
+  and that has not finished yet (`status:"cancelling"`, `cancelled` = the
+  backend acknowledged). Finished jobs report `status:"completed"`;
+  unknown ids `status:"unknown"` — neither touches the backend. An
+  interrupted job makes the blocked generate/refine call fail with the
+  ComfyUI error payload (GENERATION_FAILED). Non-empty-string
+  `job_id` required (`INVALID_JOB_ID` otherwise). The server tracks
+  registry `job_id` → backend `prompt_id` per running job.
+- New optional input `remove_bg_model` on `generate_app_asset` AND
+  `refine_asset` (default `"u2net"`; `INVALID_REMOVE_BG_MODEL` otherwise),
+  whitelist: `u2net` | `isnet-general-use` | `birefnet-general` |
+  `birefnet-general-lite` — quality upgrade; BiRefNet models download
+  once per user cache on first use (network required). `bria-rmbg`
+  stays postprocess-internal opt-in (LICENSE_REQUIRED), never exposed
+  here. Passed through as C3 `process(model=...)`.
+- `generate_app_asset` / `refine_asset` are now async tools: the blocking
+  orchestrator runs in a worker thread and the tool streams MCP progress
+  notifications per phase (0 submitted → 1 generating → 2 postprocessing
+  → 3 writing → 4 complete; total=4). Best-effort: clients without a
+  progressToken see no change; no input or output shape changed.
+- Tool count is now FIVE (was four); `server_info` output unchanged.

@@ -32,7 +32,7 @@ from src.mcp_server.validation import resolve_save_path, validate_tool_args
 
 
 def test_package_version():
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.6.0"
 
 
 def test_error_codes_distinct_and_shaped():
@@ -234,7 +234,7 @@ def test_server_config_defaults_and_remote_policy(tmp_path):
     assert cfg.comfyui_url == "http://127.0.0.1:8188"
     assert cfg.max_concurrent == 2
     assert cfg.job_timeout_s == 300
-    assert cfg.version == "0.1.0"
+    assert cfg.version == "0.6.0"
     with pytest.raises(ValueError, match="allow_remote"):
         ServerConfig(project_root=str(tmp_path), comfyui_url="http://192.168.1.10:8188")
     ok = ServerConfig(

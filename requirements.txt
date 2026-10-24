@@ -8,7 +8,7 @@
 # environment. Do not install rembg[cpu,cli]. The server only uses rembg as
 # a library (`new_session` / `remove`); pre-download the segmentation model
 # with the Python one-liner in docs/guides/setup-and-first-asset.md.
-fastmcp==4.1.0
+fastmcp==4.1.3
 rembg[cpu]==2.0.85
 Pillow==12.3.0
 # SVG vector output (C3 v0.2). Stable PyPI pin: 0.6.x uses the legacy

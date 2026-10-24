@@ -27,12 +27,13 @@ saved into your project, with the relative path returned for direct embedding:
 <img src={bearAvatar} alt="User Avatar" />
 ```
 
-## Tools (4)
+## Tools (5)
 
 | Tool | Purpose |
 |---|---|
-| `generate_app_asset` | Text-to-image → postprocess → save; returns the asset path, seed, style |
+| `generate_app_asset` | Text-to-image → postprocess → save; returns the asset path, seed, style; streams MCP progress notifications |
 | `refine_asset` | Image-to-image tweak of an existing asset (never mutates the parent) |
+| `cancel_asset_job` | Best-effort interrupt of a running generate/refine (`{cancelled, status}`) |
 | `check_model` | Verify a model file is present in a ComfyUI loader (`unet`/`clip`/`vae`/`checkpoint`) |
 | `server_info` | Backend reachability (`reachable`), queue depth, pinned model list, version |
 
@@ -117,11 +118,14 @@ ico=true)` → PNG + `@2x/@3x` + `‑32px/‑64px` + `.ico`, all embedded by pat
 Patterns/hoa văn: `category="pattern"` (or `texture`) +
 `style_preset="pattern"` + `seamless=true` → an edge-cross-faded tileable
 image plus a `<stem>-tile.png` 2x2 preview (`width`/`height` max 1024).
+Background removal defaults to `u2net`; pass `remove_bg_model="birefnet-general"`
+(best edges; ~900 MB one-time download) or `"birefnet-general-lite"` /
+`"isnet-general-use"` on either generation tool.
 
 ## Verify
 
 ```bash
-pytest tests/ -q   # 353 passed + environment-conditional skips on a full env
+pytest tests/ -q   # 391 passed + environment-conditional skips on a full env
 ```
 
 `server_info` unreachable never errors (`reachable:false`); generation without

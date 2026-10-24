@@ -115,3 +115,13 @@ Additive to v0.3. Pipeline order is now: decode/remove_bg →
 `postprocess/palette.py` (`recolor_to_palette`, FASTOCTREE quantize +
 nearest-palette mapping, alpha preserved) and `postprocess/symmetry.py`
 (`symmetrize`, pure-geometry mirror/radial, deterministic).
+
+## Addendum v0.5 (2026-10-24) — birefnet background-removal models
+
+Additive to v0.4.
+
+- `remove_background` / `process(..., model=...)` accept two new
+  session names: `birefnet-general` and `birefnet-general-lite`
+  (verified present in the pinned rembg 2.0.85; models download once per
+  user cache on first use). `u2net` remains the default;
+  `bria-rmbg` keeps its LICENSE_REQUIRED gate.

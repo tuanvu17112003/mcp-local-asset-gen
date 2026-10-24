@@ -7,7 +7,36 @@ Copy the relevant entry into the GitHub Release notes when tagging.
 
 ## [Unreleased]
 
+### Added
+- **`cancel_asset_job` tool (5 tools total)** (C1 v0.6; research
+  `docs/research/improvement-research-2026-10-24.md`): best-effort
+  interrupt of a running generate/refine via the existing ComfyUI
+  `POST /interrupt` path; returns `{job_id, cancelled, status:
+  cancelling|completed|unknown}`. The server tracks each running job's
+  backend `prompt_id`; finished/unknown ids never touch the backend.
+- **`remove_bg_model` on `generate_app_asset` and `refine_asset`**
+  (C1/C3 v0.6): opt-in background-removal model — `u2net` (default) |
+  `isnet-general-use` | `birefnet-general` (best edge quality) |
+  `birefnet-general-lite` (`INVALID_REMOVE_BG_MODEL` otherwise). The
+  BiRefNet models ship inside the pinned rembg 2.0.85 (no new
+  dependency) and download once per user cache on first use.
+- **MCP progress notifications** on `generate_app_asset` /
+  `refine_asset` (C1 v0.6): the tools are now async and stream one
+  phase tick (0 submitted → 1 generating → 2 postprocessing → 3
+  writing → 4 complete) via `ctx.report_progress` while the blocking
+  orchestrator runs in a worker thread. Best-effort: clients without a
+  progressToken see no change; input/output shapes unchanged.
+
 ### Changed
+- **Server/package versions bumped `0.1.0 → 0.6.0`** (was stale since
+  v0.1.1 despite five contract revisions; `server_info.version` now
+  reflects them).
+- Server instructions now tell agents the refine strength convention:
+  recolors/restyles need `strength >= 0.7` (schnell img2img barely
+  changes colors below ~0.6 — observed live 2026-10-24); `0.4-0.6` only
+  nudges details.
+- `fastmcp` pin bumped `4.1.0 → 4.1.3` (latest stable; fix sweep, `pip
+  check` clean).
 - **`include_image` now returns a real MCP image content block** (C1
   v0.5) instead of base64 inside the structured JSON — agents see the
   asset without megabytes of base64 in the tool output (the structured
@@ -129,6 +158,9 @@ Copy the relevant entry into the GitHub Release notes when tagging.
   when a client launches the server outside the project).
 
 ### Verified
+- 391 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
+  2026-10-24 — cancel_asset_job, progress ticks, remove_bg_model, fastmcp
+  4.1.3 included; `pip check` clean).
 - 377 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
   2026-10-24 — image-block split, negative, refine remove_bg included).
 - 376 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,

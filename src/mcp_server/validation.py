@@ -73,6 +73,14 @@ DEFAULT_REFINE_STRENGTH = 0.6
 #: Categories whose default is background removal on (per C1 contract).
 REMOVE_BG_DEFAULT_TRUE = frozenset({"icon", "avatar"})
 
+#: ``remove_bg_model`` allowlist (C1 v0.6): FOSS rembg session names only.
+#: ``bria-rmbg`` stays postprocess-internal opt-in (LICENSE_REQUIRED gate),
+#: never exposed here. ``birefnet-*`` models download once on first use.
+REMOVE_BG_MODELS = frozenset(
+    {"u2net", "isnet-general-use", "birefnet-general", "birefnet-general-lite"}
+)
+DEFAULT_REMOVE_BG_MODEL = "u2net"
+
 _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
 
 #: Absolute Windows drive path after separator normalization (``C:/x``).
@@ -407,6 +415,18 @@ def _check_symmetry(symmetry: Any) -> Any:
     )
 
 
+def _check_remove_bg_model(value: Any) -> Any:
+    """Normalize ``remove_bg_model``; ``None`` -> the default (``u2net``)."""
+    if value is None:
+        return DEFAULT_REMOVE_BG_MODEL
+    if not isinstance(value, str) or value not in REMOVE_BG_MODELS:
+        raise ValueError(
+            "INVALID_REMOVE_BG_MODEL: must be one of %s, got %r"
+            % (sorted(REMOVE_BG_MODELS), value)
+        )
+    return value
+
+
 def validate_tool_args(
     prompt: Any,
     category: Any,
@@ -427,6 +447,7 @@ def validate_tool_args(
     palette: Any = None,
     symmetry: Any = None,
     negative: Any = None,
+    remove_bg_model: Any = None,
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
@@ -537,6 +558,7 @@ def validate_tool_args(
                 "INVALID_NEGATIVE: negative must be a non-empty string when given"
             )
         negative = negative.strip()
+    remove_bg_model = _check_remove_bg_model(remove_bg_model)
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -558,6 +580,7 @@ def validate_tool_args(
         "palette": palette,
         "symmetry": symmetry,
         "negative": negative,
+        "remove_bg_model": remove_bg_model,
     }
     return validated
 
@@ -604,6 +627,8 @@ __all__ = [
     "DEFAULT_STYLE_PRESET",
     "DEFAULT_REFINE_STRENGTH",
     "REMOVE_BG_DEFAULT_TRUE",
+    "REMOVE_BG_MODELS",
+    "DEFAULT_REMOVE_BG_MODEL",
     "derive_refined_save_path",
     "resolve_save_path",
     "validate_check_model_args",
@@ -638,6 +663,7 @@ def validate_refine_args(
     workspace: Any = "default",
     include_image: Any = False,
     remove_bg: Any = False,
+    remove_bg_model: Any = None,
 ) -> Dict[str, Any]:
     """Validate ``refine_asset`` params; return a normalized args dict.
 
@@ -702,6 +728,7 @@ def validate_refine_args(
         raise ValueError(
             "INVALID_REMOVE_BG: remove_bg must be a bool, got %r" % (remove_bg,)
         )
+    remove_bg_model = _check_remove_bg_model(remove_bg_model)
 
     return {
         "asset_id": asset_id,
@@ -713,4 +740,5 @@ def validate_refine_args(
         "workspace": workspace,
         "include_image": include_image,
         "remove_bg": remove_bg,
+        "remove_bg_model": remove_bg_model,
     }

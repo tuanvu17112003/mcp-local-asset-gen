@@ -20,6 +20,7 @@ stub/canned paths keep working.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
@@ -50,73 +51,70 @@ SERVER_NAME = "asset-gen"
 #: required to do so — the text is written to stay useful however it is
 #: presented (system prompt, preamble, or on-demand reference).
 SERVER_INSTRUCTIONS = """\
-# asset-gen — local AI asset generation (4 tools)
-
-Purpose: generate app assets (icons, illustrations, avatars, splash,
-seamless patterns/ornaments) with a LOCAL ComfyUI + rembg pipeline. No
-cloud, no uploads.
+# asset-gen — local AI asset generation (5 tools): local ComfyUI + rembg
+pipeline for app assets (icons, illustrations, avatars, splash, seamless
+patterns). No cloud, no uploads.
 
 Tools — call exactly these, with these shapes:
 - generate_app_asset({prompt*, category*, save_path*, width=512,
   height=512, format="png", remove_bg=null, style_preset="flat", seed=null,
   overwrite=false, job_id=null, icon_sizes=null, ico=false,
   workspace="default", include_image=false, seamless=false, palette=null,
-  symmetry=null, negative=null}): text-to-image,
-  then transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
-  true for icon/avatar. icon_sizes e.g. [32,64] adds -32px/-64px renders;
-  ico:true adds a multi-size .ico. format:"svg" traces a vector asset
-  (save_path leaf must be <stem>.svg; only that file is written).
-  include_image:true attaches the @1x PNG as an image block so you can
-  see the result. width/height max 1024. seamless:true makes a tileable
-  pattern (edge cross-fade + <stem>-tile.png 2x2 preview; pair with
-  category pattern/texture + style_preset "pattern").
-  palette:["#hex",…] (2-8) recolors the result to EXACT brand colors;
-  symmetry "mirror-x"|"mirror-quad"|"radial:<n>" (n 2-12) enforces
-  ornament symmetry.
+  symmetry=null, negative=null, remove_bg_model=null}): text-to-image,
+  transparent PNG (+@2x/@3x) written under save_path. remove_bg defaults
+  true for icon/avatar. remove_bg_model: u2net (default) |
+  isnet-general-use | birefnet-general (best edges; big download) |
+  birefnet-general-lite. icon_sizes e.g. [32,64]; ico:true adds .ico.
+  format:"svg" traces a vector asset (leaf must be <stem>.svg; only that
+  file written). include_image:true attaches the @1x PNG as an image
+  block. width/height max 1024. seamless:true makes a tileable pattern
+  (cross-fade + 2x2 <stem>-tile.png preview; pair with category
+  pattern/texture + style_preset "pattern"). palette:["#hex",…] (2-8)
+  recolors to EXACT brand colors; symmetry "mirror-x"|"mirror-quad"|
+  "radial:<n>" (n 2-12). Progress notifications stream phases.
 - refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
-  job_id=null, workspace="default", include_image=false, remove_bg=false}):
-  image-to-image tweak; writes a NEW file, never mutates the
-  parent (default save is <stem>_refined.png). strength is (0,1]; the
-  source PNG is uploaded automatically; remove_bg:true strips the new
-  background (default keeps it).
-- check_model({name*, kind}): is a weight file present in a ComfyUI loader?
-  kind in unet|clip|vae|checkpoint (default all). Use before generating
+  job_id=null, workspace="default", include_image=false, remove_bg=false,
+  remove_bg_model=null}): image-to-image tweak; writes a NEW file, never
+  mutates the parent (default <stem>_refined.png). source PNG uploaded
+  automatically; remove_bg:true strips the new background. strength
+  (0,1]: recolors/restyles need >=0.7; 0.4-0.6 only nudges details.
+- cancel_asset_job({job_id*}): interrupt a running job;
+  {cancelled, status: cancelling|completed|unknown}.
+- check_model({name*, kind}): is a weight file present in a ComfyUI
+  loader? kind in unet|clip|vae|checkpoint (default all). Use before
+  generating.
 - server_info({}): {backend, comfyui_url, models, version, project_root,
-  workspaces, allow_any_path, reachable, queue_depth}. Call FIRST: if
-  reachable=false, do not call generate.
+  workspaces, allow_any_path, reachable, queue_depth}. Call FIRST; if
+  reachable=false, do not generate.
 
 Workflow: server_info → (check_model for non-default weights) →
-generate_app_asset → embed the returned asset_path in code → refine_asset
-to iterate (pass seed to reproduce).
+generate_app_asset → embed asset_path in code → refine_asset to iterate.
 
 Rules: YOU choose the output path.
-- save_path may be ABSOLUTE ("C:/proj/src/assets/icon.png") or relative
-  ("assets/icons/icon.png"): absolute is used exactly as given, relative
-  resolves under the selected workspace root.
-- The leaf must be a lowercase .png file (or .svg with format:"svg") with
-  a safe stem ([A-Za-z0-9._-]): the leaf names the written file, so
-  "icon.webp" is refused pre-backend (POLICY_DENIED INVALID_SAVE_PATH).
+- save_path may be ABSOLUTE ("C:/proj/src/assets/icon.png") or relative:
+  absolute used exactly as given, relative resolves under the selected
+  workspace root.
+- Leaf must be lowercase .png (or .svg with format:"svg"), safe stem
+  [A-Za-z0-9._-]: the leaf names the written file; "icon.webp" refused
+  pre-backend (POLICY_DENIED INVALID_SAVE_PATH).
 - An absolute path must land inside an approved root (project_root or a
   named workspace — see server_info.workspaces), checked on the RESOLVED
-  path. Windows backslashes are accepted; ".." traversal, NUL bytes,
-  ':' (NTFS streams) and reserved device names (NUL, COM1, …) are not.
-  --allow-any-path removes every containment check (opt-in, default off).
-- The default project_root is the server's start directory (your
-  workspace) unless configured otherwise — compare once via server_info.
-  If your target tree is not an approved root, the human must add it
-  (--workspace name=path).
+  path. ".." traversal, NUL bytes, ':' (NTFS streams) and device names
+  (NUL, COM1, …) are not; backslashes are. --allow-any-path removes all
+  containment checks (opt-in, default off).
+- Default project_root is the server's start directory (your workspace)
+  unless configured — compare once via server_info. If your target tree
+  is not an approved root, the human must add it (--workspace name=path).
 - Result: asset_path (relative to asset_root), asset_path_absolute
-  (exact location), asset_root (the approved root owning the file).
-Existing files need overwrite:true. Refine parents must exist. At most
-2 concurrent jobs (excess → QUEUED with job_id; reuse job_id for
-idempotent retry).
+  (exact location), asset_root (root owning the file).
+Existing files need overwrite:true. Refine parents must exist. Max 2
+concurrent jobs (excess → QUEUED; reuse job_id for idempotent retry).
 
 Errors (machine-readable CODE prefix; fix the cause, don't blindly retry):
-BACKEND_UNAVAILABLE (ComfyUI down);
-GENERATION_FAILED (covers JOB_FAILED/JOB_TIMEOUT payloads); POLICY_DENIED
-(bad path/overwrite); INVALID_* (bad args, rejected pre-backend);
-POSTPROCESS_FAILED (includes LICENSE_REQUIRED: bria-rmbg is
-postprocess-internal opt-in — use the default model).
+BACKEND_UNAVAILABLE (ComfyUI down); GENERATION_FAILED (covers
+JOB_FAILED/JOB_TIMEOUT); POLICY_DENIED (bad path/overwrite); INVALID_*
+(bad args, pre-backend); POSTPROCESS_FAILED (includes LICENSE_REQUIRED:
+bria-rmbg is postprocess-internal opt-in — use the default model).
 
 Limits: localhost ComfyUI only (allow_remote opt-in); 512px default;
 postprocess trims/pads and center-crops icons.
@@ -176,6 +174,9 @@ def load_backend(config: ServerConfig) -> Any:
             def fetch_result(self, job_id: Any) -> Any:
                 return self._fail("fetch_result")
 
+            def cancel(self, prompt_id: Any = None, client_id: Any = None) -> Any:
+                return self._fail("cancel")
+
         return _UnavailableBackend()
 
 
@@ -220,6 +221,33 @@ def _with_image_block(result):
 
     structured = {k: v for k, v in result.items() if k != "image"}
     return ToolResult(content=[image], structured_content=structured)
+
+
+def _tool_context() -> Any:
+    """Current MCP request context (lazy fastmcp import, request-scoped)."""
+    from fastmcp.server.dependencies import get_context
+
+    return get_context()
+
+
+def _progress_reporter(ctx: Any) -> Callable[[int, int, str], None]:
+    """Best-effort ``ctx.report_progress`` bridge for worker threads (C1 v0.6).
+
+    The orchestrator runs in ``asyncio.to_thread``; the callback marshals
+    each phase tick back onto the event loop the tool call is running on.
+    Clients that sent no progressToken make the notification a no-op.
+    """
+    loop = asyncio.get_running_loop()
+
+    def _report(value: int, total: int, message: str) -> None:
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ctx.report_progress(value, total, message), loop
+            )
+        except Exception:
+            pass  # progress is best-effort, never breaks generation
+
+    return _report
 
 
 def create_server(
@@ -273,7 +301,7 @@ def create_server(
     mcp = FastMCP(SERVER_NAME, instructions=SERVER_INSTRUCTIONS)
 
     @mcp.tool
-    def generate_app_asset(
+    async def generate_app_asset(
         prompt: str,
         category: str,
         save_path: str,
@@ -293,9 +321,12 @@ def create_server(
         palette: Optional[Any] = None,
         symmetry: Optional[str] = None,
         negative: Optional[str] = None,
+        remove_bg_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate an app asset with local ComfyUI + postprocessing."""
         from .validation import validate_tool_args
+
+        ctx = _tool_context()
 
         try:
             args = validate_tool_args(
@@ -318,13 +349,21 @@ def create_server(
                 palette=palette,
                 symmetry=symmetry,
                 negative=negative,
+                remove_bg_model=remove_bg_model,
             )
-            return _with_image_block(orchestrator.generate(args, project_root))
+            result = await asyncio.to_thread(
+                orchestrator.generate,
+                args,
+                project_root,
+                None,
+                _progress_reporter(ctx),
+            )
+            return _with_image_block(result)
         except McpServerError as exc:
             raise RuntimeError(str(exc)) from exc
 
     @mcp.tool
-    def refine_asset(
+    async def refine_asset(
         instruction: str,
         asset_id: Optional[str] = None,
         asset_path: Optional[str] = None,
@@ -334,9 +373,12 @@ def create_server(
         workspace: str = "default",
         include_image: bool = False,
         remove_bg: bool = False,
+        remove_bg_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Refine an existing asset; creates a new file, never mutates."""
         from .validation import validate_refine_args
+
+        ctx = _tool_context()
 
         try:
             args = validate_refine_args(
@@ -349,8 +391,24 @@ def create_server(
                 workspace=workspace,
                 include_image=include_image,
                 remove_bg=remove_bg,
+                remove_bg_model=remove_bg_model,
             )
-            return _with_image_block(orchestrator.refine(args, project_root))
+            result = await asyncio.to_thread(
+                orchestrator.refine,
+                args,
+                project_root,
+                None,
+                _progress_reporter(ctx),
+            )
+            return _with_image_block(result)
+        except McpServerError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    @mcp.tool
+    def cancel_asset_job(job_id: str) -> Dict[str, Any]:
+        """Best-effort interrupt of a running generate/refine job."""
+        try:
+            return orchestrator.cancel_job(job_id)
         except McpServerError as exc:
             raise RuntimeError(str(exc)) from exc
 

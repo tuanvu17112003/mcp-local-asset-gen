@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 DEFAULT_COMFYUI_URL = "http://127.0.0.1:8188"
 DEFAULT_MAX_CONCURRENT = 2
 DEFAULT_JOB_TIMEOUT_S = 300.0
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.6.0"
 
 #: Hostnames treated as loopback for the default localhost-only policy.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})

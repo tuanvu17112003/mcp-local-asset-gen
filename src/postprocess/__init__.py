@@ -35,7 +35,7 @@ from .palette import recolor_to_palette
 from .trim import trim_and_pad
 from .vectorize import vectorize_rgba
 
-__version__ = "0.1.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "__version__",

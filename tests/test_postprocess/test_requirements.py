@@ -7,7 +7,7 @@ tests can catch cheaply is a regression that reintroduces the known
 unsatisfiable pair:
 
     rembg[cli] 2.0.85  -> python-multipart<0.0.22
-    fastmcp 4.1.0      -> fastmcp-slim[server] -> python-multipart>=0.0.26
+    fastmcp 4.1.3      -> fastmcp-slim[server] -> python-multipart>=0.0.26
 
 The checks parse the requirement lines instead of comparing exact strings,
 so any spelling that reintroduces the conflict is caught.
@@ -73,7 +73,7 @@ def test_known_good_pins_present():
     assert "fastmcp" in by_name, sorted(by_name)
     assert "rembg" in by_name, sorted(by_name)
     assert "pillow" in by_name, sorted(by_name)
-    assert any("==4.1.0" in rest for _line, rest in by_name["fastmcp"]), by_name["fastmcp"]
+    assert any("==4.1.3" in rest for _line, rest in by_name["fastmcp"]), by_name["fastmcp"]
 
 
 def test_requirements_do_not_pin_python_multipart_directly():

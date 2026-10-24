@@ -50,6 +50,7 @@ from __future__ import annotations
 import os
 import random
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -122,6 +123,7 @@ _GENERATE_FIELDS = (
     "palette",
     "symmetry",
     "negative",
+    "remove_bg_model",
 )
 
 _REFINE_FIELDS = (
@@ -134,6 +136,7 @@ _REFINE_FIELDS = (
     "workspace",
     "include_image",
     "remove_bg",
+    "remove_bg_model",
 )
 
 
@@ -199,6 +202,10 @@ class AssetOrchestrator:
             max_concurrent = config.max_concurrent if config is not None else 2
             registry = JobRegistry(max_concurrent=max_concurrent)
         self._registry = registry
+        # C1 v0.6 cancel support: registry job_id -> backend prompt_id for
+        # jobs whose backend submit succeeded and that are not finished yet.
+        self._active_backends: Dict[str, str] = {}
+        self._active_lock = threading.Lock()
 
     # -- backend adapters -------------------------------------------------
 
@@ -259,6 +266,61 @@ class AssetOrchestrator:
                 % (backend_job_id,)
             )
         return raw
+
+    # -- progress + cancel (C1 v0.6) -----------------------------------------
+
+    @staticmethod
+    def _emit(
+        progress: Optional[Callable[[int, int, str], None]], value: int, total: int, message: str
+    ) -> None:
+        """Fire one phase tick; progress is best-effort and never raises."""
+        if progress is None:
+            return
+        try:
+            progress(value, total, message)
+        except Exception:
+            pass
+
+    def _track_job(self, job_id: str, backend_job_id: str) -> None:
+        with self._active_lock:
+            self._active_backends[job_id] = backend_job_id
+
+    def _untrack_job(self, job_id: str) -> None:
+        with self._active_lock:
+            self._active_backends.pop(job_id, None)
+
+    def cancel_job(self, job_id: Any) -> Dict[str, Any]:
+        """Best-effort ``POST /interrupt`` for a running job (C1 v0.6).
+
+        Only a job whose backend submit succeeded and that has not finished
+        yet can be interrupted (its backend ``prompt_id`` is still tracked).
+        Finished jobs report ``status:"completed"``; unknown ids report
+        ``status:"unknown"``. ComfyUI ``/interrupt`` does not synchronously
+        confirm the abort — the interrupted generate/refine call fails with
+        the ComfyUI error payload afterwards.
+        """
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError(
+                "INVALID_JOB_ID: job_id must be a non-empty string, got %r"
+                % (job_id,)
+            )
+        with self._active_lock:
+            backend_job_id = self._active_backends.get(job_id)
+        if backend_job_id is None:
+            if self._registry.get(job_id) is not None:
+                return {"job_id": job_id, "cancelled": False, "status": "completed"}
+            return {"job_id": job_id, "cancelled": False, "status": "unknown"}
+        cancel_fn = getattr(self._backend, "cancel", None)
+        if not callable(cancel_fn):
+            raise BackendUnavailableError(
+                "BACKEND_UNAVAILABLE: backend does not support cancel"
+            )
+        acknowledged = bool(cancel_fn(prompt_id=backend_job_id))
+        return {
+            "job_id": job_id,
+            "cancelled": acknowledged,
+            "status": "cancelling",
+        }
 
     # -- shared flow pieces -------------------------------------------------
 
@@ -464,8 +526,14 @@ class AssetOrchestrator:
         validated_args: Dict[str, Any],
         project_root: Any,
         job_id: Optional[str] = None,
+        progress: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict[str, Any]:
-        """Run the generate flow; return the C1 ``generate_app_asset`` output."""
+        """Run the generate flow; return the C1 ``generate_app_asset`` output.
+
+        ``progress`` (optional, C1 v0.6) receives ``(value, total, message)``
+        phase ticks (0 submitted → 1 generating → 2 postprocessing →
+        3 writing → 4 complete); it is best-effort and never raises.
+        """
         if not isinstance(validated_args, dict):
             raise ValueError(
                 "INVALID_ARGS: validated_args must be a dict, got %r"
@@ -490,6 +558,7 @@ class AssetOrchestrator:
                 allow_any_path=self._allow_any_path(),
                 fmt=args["format"],
             )
+            self._emit(progress, 0, 4, "submitting workflow to ComfyUI")
             backend_job_id = self._submit_txt2img(
                 prompt=args["prompt"],
                 width=args["width"],
@@ -498,18 +567,22 @@ class AssetOrchestrator:
                 style=STYLE_TO_BACKEND[args["style_preset"]],
                 negative=args.get("negative"),
             )
+            self._track_job(jid, backend_job_id)
+            self._emit(progress, 1, 4, "generating on ComfyUI (job %s)" % backend_job_id)
             fetched = self._fetch_png_and_seed(backend_job_id)
+            self._untrack_job(jid)
             seed = args["seed"]
             if seed is None:
                 seed = fetched.get("seed")
             if seed is None:  # neither caller nor backend supplied one (mirrors C2)
                 seed = random.randint(0, 0xFFFFFFFF)
             stem = Path(args["save_path"].replace("\\", "/")).stem
+            self._emit(progress, 2, 4, "postprocessing (remove_bg, trim, exports)")
             try:
                 processed = self._postprocess(
                     bytes(fetched["png_bytes"]),
                     remove_bg=args["remove_bg"],
-                    model="u2net",
+                    model=args["remove_bg_model"],
                     trim=True,
                     sizes=(1, 2, 3),
                     stem=stem,
@@ -571,6 +644,7 @@ class AssetOrchestrator:
                 approved_roots,
                 allow_any_path=self._allow_any_path(),
             )
+            self._emit(progress, 3, 4, "files written, recording result")
             result = {
                 "asset_path": self._relative_posix(target, approved_roots),
                 "asset_path_absolute": os.fspath(target),
@@ -590,15 +664,18 @@ class AssetOrchestrator:
                     )
                 result["image"] = _image_content(bytes(base_png))
         except McpServerError:
+            self._untrack_job(jid)
             self._registry.fail(jid)
             raise
         except Exception as exc:
+            self._untrack_job(jid)
             self._registry.fail(jid)
             code = getattr(exc, "code", None)
             if isinstance(code, str):
                 raise translate_sibling_error(exc) from exc
             raise
         self._registry.complete(jid, result)
+        self._emit(progress, 4, 4, "complete")
         return result
 
     def refine(
@@ -606,10 +683,13 @@ class AssetOrchestrator:
         validated_args: Dict[str, Any],
         project_root: Any,
         job_id: Optional[str] = None,
+        progress: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict[str, Any]:
         """Run the refine flow; return the C1 ``refine_asset`` output.
 
         Creates a NEW file; the parent is only read, never mutated.
+        ``progress`` (optional, C1 v0.6) receives the same phase ticks as
+        :meth:`generate`.
         """
         if not isinstance(validated_args, dict):
             raise ValueError(
@@ -649,18 +729,23 @@ class AssetOrchestrator:
                 allowed_roots=approved_roots,
                 allow_any_path=self._allow_any_path(),
             )
+            self._emit(progress, 0, 4, "submitting img2img workflow to ComfyUI")
             backend_job_id = self._submit_img2img(
                 input_png_path=os.fspath(parent_abs),
                 instruction=args["instruction"],
                 strength=args["strength"],
             )
+            self._track_job(jid, backend_job_id)
+            self._emit(progress, 1, 4, "refining on ComfyUI (job %s)" % backend_job_id)
             fetched = self._fetch_png_and_seed(backend_job_id)
+            self._untrack_job(jid)
             stem = Path(save_path.replace("\\", "/")).stem
+            self._emit(progress, 2, 4, "postprocessing (remove_bg, exports)")
             try:
                 processed = self._postprocess(
                     bytes(fetched["png_bytes"]),
                     remove_bg=args.get("remove_bg", False),
-                    model="u2net",
+                    model=args["remove_bg_model"],
                     trim=False,
                     sizes=(1, 2, 3),
                     stem=stem,
@@ -677,6 +762,7 @@ class AssetOrchestrator:
                 approved_roots,
                 allow_any_path=self._allow_any_path(),
             )
+            self._emit(progress, 3, 4, "files written, recording result")
             result = {
                 "asset_path": self._relative_posix(target, approved_roots),
                 "asset_path_absolute": os.fspath(target),
@@ -702,15 +788,18 @@ class AssetOrchestrator:
                     )
                 result["image"] = _image_content(bytes(base_png))
         except McpServerError:
+            self._untrack_job(jid)
             self._registry.fail(jid)
             raise
         except Exception as exc:
+            self._untrack_job(jid)
             self._registry.fail(jid)
             code = getattr(exc, "code", None)
             if isinstance(code, str):
                 raise translate_sibling_error(exc) from exc
             raise
         self._registry.complete(jid, result)
+        self._emit(progress, 4, 4, "complete")
         return result
 
     def _resolve_parent(

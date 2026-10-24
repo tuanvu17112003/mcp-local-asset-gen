@@ -15,7 +15,13 @@ from PIL import Image
 
 from .errors import DecodeFailedError, LicenseRequiredError, SegmentationFailedError
 
-SUPPORTED_MODELS = ("u2net", "isnet-general-use", "bria-rmbg")
+SUPPORTED_MODELS = (
+    "u2net",
+    "isnet-general-use",
+    "birefnet-general",
+    "birefnet-general-lite",
+    "bria-rmbg",
+)
 DEFAULT_MODEL = "u2net"
 QUALITY_MODEL = "isnet-general-use"
 BRIA_MODEL = "bria-rmbg"

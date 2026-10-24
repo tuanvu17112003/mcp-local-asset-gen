@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 LAUNCHER = ROOT / "asset-gen.py"
 
 EXPECTED_TOOLS = frozenset(
-    {"generate_app_asset", "refine_asset", "server_info", "check_model"}
+    {"generate_app_asset", "refine_asset", "server_info", "check_model",
+     "cancel_asset_job"}
 )
 
 FAKE_PNG = b"\x89PNG\r\n\x1a\nfake-bytes-no-decode-needed"

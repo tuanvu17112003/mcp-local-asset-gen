@@ -1,4 +1,4 @@
-"""JSON-schema dicts for the four C1 tools (contract v0.2, Operations).
+"""JSON-schema dicts for the five C1 tools (contract v0.6, Operations).
 
 Plain dicts only — no third-party schema library. Mirrors contract
 section "Operations / inputs / outputs" exactly:
@@ -6,17 +6,19 @@ section "Operations / inputs / outputs" exactly:
 * ``generate_app_asset({prompt*, category*, save_path*, width?, height?,
   format?, remove_bg?, style_preset?, seed?, overwrite?, job_id?,
   icon_sizes?, ico?, workspace?, include_image?, seamless?, palette?,
-  symmetry?})``
+  symmetry?, negative?, remove_bg_model?})``
   returns ``{asset_path, asset_path_absolute, asset_root, width, height,
   format, seed, style_preset, job_id[, image]}``
 * ``refine_asset({asset_id|asset_path, instruction*, save_path?, strength?, job_id?,
-  workspace?, include_image?})``
+  workspace?, include_image?, remove_bg?, remove_bg_model?})``
   returns ``{asset_path, asset_path_absolute, asset_root, job_id,
   parent_job_id[, image]}``
 * ``server_info({})`` returns
   ``{backend, comfyui_url, models, version, project_root, workspaces,
   allow_any_path, reachable, queue_depth}``
 * ``check_model({name*, kind?})`` returns ``{available, loader, checked_at}``
+* ``cancel_asset_job({job_id*})`` returns
+  ``{job_id, cancelled, status}`` (C1 v0.6)
 
 C1 v0.2 (2026-10-24): ``format="svg"`` produces a real vector asset (the
 leaf must be ``<stem>.svg``; only that file is written) and
@@ -187,6 +189,16 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                     "(n = 2..12 rotational symmetry)."
                 ),
             },
+            "remove_bg_model": {
+                "type": "string",
+                "enum": ["u2net", "isnet-general-use", "birefnet-general", "birefnet-general-lite"],
+                "default": "u2net",
+                "description": (
+                    "Background-removal model (default u2net). "
+                    "birefnet-general has the best edge quality but "
+                    "downloads once (~900 MB) on first use."
+                ),
+            },
         },
     },
     "output_schema": {
@@ -280,6 +292,20 @@ REFINE_ASSET_SCHEMA: Dict[str, Any] = {
                     "optional 'image' result key (default false)."
                 ),
             },
+            "remove_bg": {
+                "type": "boolean",
+                "default": False,
+                "description": "Strip the refined output's background (default false).",
+            },
+            "remove_bg_model": {
+                "type": "string",
+                "enum": ["u2net", "isnet-general-use", "birefnet-general", "birefnet-general-lite"],
+                "default": "u2net",
+                "description": (
+                    "Background-removal model used when remove_bg is true "
+                    "(default u2net; birefnet-general has the best edges)."
+                ),
+            },
         },
     },
     "output_schema": {
@@ -291,6 +317,34 @@ REFINE_ASSET_SCHEMA: Dict[str, Any] = {
             "asset_root": {"type": ["string", "null"]},
             "job_id": {"type": "string"},
             "parent_job_id": {"type": "string"},
+        },
+    },
+}
+
+CANCEL_ASSET_JOB_SCHEMA: Dict[str, Any] = {
+    "name": "cancel_asset_job",
+    "description": (
+        "Best-effort interrupt of a running generate/refine job (C1 v0.6)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "required": ["job_id"],
+        "additionalProperties": False,
+        "properties": {
+            "job_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The C1 job_id whose backend run should be interrupted.",
+            },
+        },
+    },
+    "output_schema": {
+        "type": "object",
+        "required": ["job_id", "cancelled", "status"],
+        "properties": {
+            "job_id": {"type": "string"},
+            "cancelled": {"type": "boolean"},
+            "status": {"type": "string", "enum": ["cancelling", "completed", "unknown"]},
         },
     },
 }
@@ -380,6 +434,7 @@ TOOL_SCHEMAS = (
     REFINE_ASSET_SCHEMA,
     SERVER_INFO_SCHEMA,
     CHECK_MODEL_SCHEMA,
+    CANCEL_ASSET_JOB_SCHEMA,
 )
 
 __all__ = [
@@ -387,6 +442,7 @@ __all__ = [
     "REFINE_ASSET_SCHEMA",
     "SERVER_INFO_SCHEMA",
     "CHECK_MODEL_SCHEMA",
+    "CANCEL_ASSET_JOB_SCHEMA",
     "BEAR_AVATAR_EXAMPLE",
     "PATH_ESCAPE_EXAMPLE",
     "TOOL_SCHEMAS",
