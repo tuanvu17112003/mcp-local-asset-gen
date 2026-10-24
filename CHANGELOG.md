@@ -5,7 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 Copy the relevant entry into the GitHub Release notes when tagging.
 
-## [Unreleased]
+## [v0.6.0] — 2026-10-24 (tag: `v0.6.0`)
+
+Minor release. Contract: C1 v0.1.x → v0.6, C3 v0.2 → v0.5 (additive only).
+Research: `docs/research/improvement-research-2026-10-24.md`.
 
 ### Added
 - **`cancel_asset_job` tool (5 tools total)** (C1 v0.6; research
