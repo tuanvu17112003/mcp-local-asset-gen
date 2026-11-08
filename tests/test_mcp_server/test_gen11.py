@@ -408,15 +408,37 @@ def test_reserved_device_name_refused(tmp_path, name):
     assert backend.txt2img_calls == []
 
 
-def test_postprocess_device_name_and_nul_refused(tmp_path):
+def test_postprocess_nul_refused(tmp_path):
+    """A NUL byte is refused on every platform (not a legal filename anywhere).
+
+    Split out of the old combined loop: the companion device-name case below
+    is Windows-ONLY by design (`_is_reserved_device_name` returns False when
+    `os.name != "nt"`, because "NUL.png" is an ordinary filename on POSIX),
+    so asserting it on Linux was wrong and broke CI on ubuntu runners.
+    """
     orch, _, _ = make_orchestrator(tmp_path)
     target = tmp_path / "assets" / "icon.png"
     target.parent.mkdir(parents=True)
-    for filename in ("NUL.png", "evil\x00.png"):
-        with pytest.raises(PolicyDeniedError):
-            orch._write_files(
-                [{"filename": filename, "png_bytes": FAKE_PNG}], target, [tmp_path]
-            )
+    with pytest.raises(PolicyDeniedError):
+        orch._write_files(
+            [{"filename": "evil\x00.png", "png_bytes": FAKE_PNG}], target, [tmp_path]
+        )
+    assert not target.exists()
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason='Windows device names only: "NUL.png" is a legal POSIX filename '
+    "and _is_reserved_device_name() is Windows-gated by design",
+)
+def test_postprocess_device_name_refused(tmp_path):
+    orch, _, _ = make_orchestrator(tmp_path)
+    target = tmp_path / "assets" / "icon.png"
+    target.parent.mkdir(parents=True)
+    with pytest.raises(PolicyDeniedError):
+        orch._write_files(
+            [{"filename": "NUL.png", "png_bytes": FAKE_PNG}], target, [tmp_path]
+        )
 
 
 @pytest.mark.skipif(os.name != "nt", reason="NTFS alternate data streams")
