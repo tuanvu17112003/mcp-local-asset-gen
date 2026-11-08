@@ -58,6 +58,7 @@ KIND_TO_LOADERS = {
     "vae": ["VAELoader"],
     "checkpoint": ["CheckpointLoaderSimple"],
     "lora": ["LoraLoaderModelOnly"],
+    "upscale": ["UpscaleModelLoader"],
 }
 
 #: Allowlist of user-facing ``check_model`` kinds (keys of KIND_TO_LOADERS).
@@ -74,6 +75,15 @@ DEFAULT_STYLE_PRESET = "flat"
 
 #: Default img2img strength for ``refine_asset`` (mirrors C2 ``DEFAULT_STRENGTH``).
 DEFAULT_REFINE_STRENGTH = 0.6
+
+#: C1 v0.8 P1: model-upscale factors accepted by ``generate_app_asset``
+#: (1 = off; 2/4 splice a ComfyUI upscale pass through C2).
+UPSCALE_FACTORS = (1, 2, 4)
+
+#: C1 v0.8 P2: variants per call (independent seeds) and the contact-sheet
+#: cell size used when ``contact_sheet`` is requested.
+VARIANTS_MAX = 8
+CONTACT_SHEET_CELL_PX = 512
 
 #: Categories whose default is background removal on (per C1 contract).
 REMOVE_BG_DEFAULT_TRUE = frozenset({"icon", "avatar"})
@@ -471,6 +481,87 @@ def _check_lora(lora: Any, lora_strength: Any) -> Tuple[Optional[str], float]:
     return cleaned, float(strength)
 
 
+def _check_upscale(upscale: Any) -> int:
+    """Validate the P1 ``upscale`` factor; return ``1``/``2``/``4``.
+
+    ``None`` normalizes to ``1`` (off). ``bool`` is rejected even though it
+    subclasses ``int``. Anything outside :data:`UPSCALE_FACTORS` raises
+    ``ValueError`` ``INVALID_UPSCALE`` pre-backend.
+    """
+    if upscale is None:
+        return 1
+    if (
+        isinstance(upscale, bool)
+        or not isinstance(upscale, int)
+        or upscale not in UPSCALE_FACTORS
+    ):
+        raise ValueError(
+            "INVALID_UPSCALE: upscale must be one of %s, got %r"
+            % (UPSCALE_FACTORS, upscale)
+        )
+    return upscale
+
+
+def _check_upscale_model(upscale_model: Any) -> Optional[str]:
+    """Validate the P1 ``upscale_model`` override; return basename or ``None``.
+
+    ``None`` means "auto-pick the first model ComfyUI reports". Any other
+    value must be a plain basename under ComfyUI ``models/upscale_models/``:
+    separators and ``..`` are refused with ``ValueError``
+    ``INVALID_UPSCALE_MODEL``.
+    """
+    if upscale_model is None:
+        return None
+    if not isinstance(upscale_model, str) or not upscale_model.strip():
+        raise ValueError(
+            "INVALID_UPSCALE_MODEL: upscale_model must be a non-empty "
+            "basename, got %r" % (upscale_model,)
+        )
+    cleaned = upscale_model.strip()
+    if ".." in cleaned or "/" in cleaned or "\\" in cleaned:
+        raise ValueError(
+            "INVALID_UPSCALE_MODEL: upscale_model must be a basename "
+            "without path traversal, got %r" % (upscale_model,)
+        )
+    return cleaned
+
+
+def _check_variants(variants: Any, contact_sheet: Any) -> Tuple[int, bool]:
+    """Validate the P2 ``variants``/``contact_sheet`` pair.
+
+    ``variants`` defaults to ``1``; valid range is ``1..VARIANTS_MAX``
+    (``INVALID_VARIANTS``). ``contact_sheet`` is a bool
+    (``INVALID_CONTACT_SHEET``) and is only meaningful when
+    ``variants > 1`` -- asking for a sheet of a single image is refused
+    with ``INVALID_CONTACT_SHEET`` so callers do not silently get a
+    1x1 sheet.
+    """
+    if variants is None:
+        variants = 1
+    if (
+        isinstance(variants, bool)
+        or not isinstance(variants, int)
+        or not 1 <= variants <= VARIANTS_MAX
+    ):
+        raise ValueError(
+            "INVALID_VARIANTS: variants must be an int in 1..%d, got %r"
+            % (VARIANTS_MAX, variants)
+        )
+    if contact_sheet is None:
+        contact_sheet = False
+    if not isinstance(contact_sheet, bool):
+        raise ValueError(
+            "INVALID_CONTACT_SHEET: contact_sheet must be a bool, got %r"
+            % (contact_sheet,)
+        )
+    if contact_sheet and variants < 2:
+        raise ValueError(
+            "INVALID_CONTACT_SHEET: contact_sheet requires variants >= 2, "
+            "got variants=%r" % (variants,)
+        )
+    return variants, contact_sheet
+
+
 def validate_tool_args(
     prompt: Any,
     category: Any,
@@ -494,6 +585,10 @@ def validate_tool_args(
     remove_bg_model: Any = None,
     lora: Any = None,
     lora_strength: Any = None,
+    upscale: Any = None,
+    upscale_model: Any = None,
+    variants: Any = None,
+    contact_sheet: Any = None,
 ) -> Dict[str, Any]:
     """Validate ``generate_app_asset`` params; return normalized args dict.
 
@@ -606,6 +701,14 @@ def validate_tool_args(
         negative = negative.strip()
     remove_bg_model = _check_remove_bg_model(remove_bg_model)
     lora, lora_strength = _check_lora(lora, lora_strength)
+    upscale = _check_upscale(upscale)
+    upscale_model = _check_upscale_model(upscale_model)
+    if upscale == 1 and upscale_model is not None:
+        raise ValueError(
+            "INVALID_UPSCALE_MODEL: upscale_model given without upscale "
+            "(pass upscale=2 or upscale=4)"
+        )
+    variants, contact_sheet = _check_variants(variants, contact_sheet)
 
     validated: Dict[str, Any] = {
         "prompt": prompt,
@@ -630,6 +733,10 @@ def validate_tool_args(
         "remove_bg_model": remove_bg_model,
         "lora": lora,
         "lora_strength": lora_strength,
+        "upscale": upscale,
+        "upscale_model": upscale_model,
+        "variants": variants,
+        "contact_sheet": contact_sheet,
     }
     return validated
 

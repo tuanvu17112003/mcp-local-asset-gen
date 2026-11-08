@@ -2,6 +2,14 @@
 
 Authoritative owner: PQM0. BASELINED v0.1.2 — controlled amendments only.
 
+- v0.3 (2026-11-08, release v0.8.0) adds the model-upscale node chain and
+  the combo-shape `/object_info` parsing — see the v0.3 addendum at the end
+  of this file. Re-verify the current content hash with
+  `scripts/hash_contract.py` (tracked in-repo since v0.8); the v0.1.2
+  baseline below is retained for history.
+- v0.3 content hash:
+  `sha256:50624C3EA22F0CD9BC6D4A97D8E583566E7F674AA7D84253BB235B7AC6C7C28A`
+
 - ID / version / content hash or immutable revision:
   `C2-gen-backend-job` / `v0.1.2` /
   `sha256:73ED6F4AECA7E9B3B22B4206FC1C5BF17DD79154B0DC5ECB9B25DEEB6B55206D`
@@ -137,3 +145,31 @@ Additive to v0.1.3.
   filtered by `prompt_id`). `websocket-client==1.9.2` is a new runtime
   dependency (lazy import). History polling remains the source of truth.
 - `loader_files` allowlist gains `LoraLoaderModelOnly` (`models/loras/`).
+## Addendum v0.3 (2026-11-08) — model upscale node chain
+
+Additive to the v0.2 LoRA/WS addendum (release v0.8.0).
+
+- New module `gen_backend/upscale.py`: `UPSCALE_FACTORS = (1, 2, 4)`,
+  `UPSCALE_NODE_MAP` (`loader_node` "14", `upscale_node` "15",
+  `save_node` "9"), `validate_upscale_factor`, `validate_upscale_model`,
+  `inject_upscale(prompt_dict, *, factor, model_name)` and the pure
+  `resolve_upscale_model(requested, available)`.
+- `submit_txt2img(..., upscale=1, upscale_model=None)`: `factor == 1`
+  submits the graph unchanged; `2`/`4` inject
+  `"14" UpscaleModelLoader{model_name}` -> `"15"
+  ImageUpscaleWithModel{upscale_model: ["14",0], image: <SaveImage images
+  ref>}` -> `SaveImage "9".images = ["15",0]`. The effective pixel factor
+  is the WEIGHT's own (a `*_x4` file quadruples); callers needing an exact
+  size resize afterwards. `upscale > 1` without an `upscale_model` raises
+  `INVALID_UPSCALE_MODEL`; a malformed graph raises
+  `WORKFLOW_NODE_MISMATCH`. Re-injection reuses node "15" (never wired to
+  itself) and rewrites node "14"'s model name.
+- Node-id ownership stays explicit: `11`/`12` img2img, `13` LoRA,
+  `14`/`15` upscale, `9` SaveImage.
+- Verified LIVE on ComfyUI 0.41.0 (RTX 3080, 10.7 GB): a real
+  `inject_params -> inject_upscale(factor=4, RealESRGAN_x4.pth)` graph
+  returns a 2048x2048 PNG.
+- `ComfyClient.loader_files` now parses BOTH `/object_info` option shapes:
+  the legacy `[[names], {...}]` list and the newer
+  `["COMBO", {"options": [names]}]` combo that ComfyUI 0.41.0 serves for
+  `UpscaleModelLoader`. `UpscaleModelLoader` joins `ALLOWED_LOADERS`.

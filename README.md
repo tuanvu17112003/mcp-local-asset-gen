@@ -34,7 +34,7 @@ saved into your project, with the relative path returned for direct embedding:
 | `generate_app_asset` | Text-to-image → postprocess → save; returns the asset path, seed, style; streams MCP progress (phases + per-node %) |
 | `refine_asset` | Image-to-image tweak of an existing asset (never mutates the parent) |
 | `cancel_asset_job` | Best-effort interrupt of a running generate/refine (`{cancelled, status}`) |
-| `check_model` | Verify a model file is present in a ComfyUI loader (`unet`/`clip`/`vae`/`checkpoint`/`lora`) |
+| `check_model` | Verify a model file is present in a ComfyUI loader (`unet`/`clip`/`vae`/`checkpoint`/`lora`/`upscale`) |
 | `server_info` | Backend reachability (`reachable`), queue depth, pinned model list, version |
 
 Path confinement is server-side: tools can only write inside an approved
@@ -66,6 +66,13 @@ the @1x PNG as an MCP image block so the agent can see what it made.
 python -m venv .venv
 .venv/Scripts/activate            # Windows; use bin/activate on Linux/macOS
 pip install -r requirements.txt   # runtime (add -dev for pytest)
+# or, from a checkout (installs the `asset-gen` console script):
+pip install -e .
+```
+
+```bash
+asset-gen --help              # console script (installed above)
+python asset-gen.py --selftest   # offline self-check: no ComfyUI, no GPU, no model
 ```
 
 Download the weights into your ComfyUI `models/` folders
@@ -115,6 +122,21 @@ Verify: call `server_info` → `{"backend":"comfyui", ..., "reachable":true}`.
 Then generate, e.g. `generate_app_asset(prompt="...",
 category="icon", save_path="assets/icons/app.png", icon_sizes=[32,64],
 ico=true)` → PNG + `@2x/@3x` + `‑32px/‑64px` + `.ico`, all embedded by path.
+
+**Real resolution (v0.8).** `@2x/@3x` are Lanczos copies of the base, so the
+detail ceiling is the render size. `upscale=2|4` runs a real ComfyUI
+model-upscale pass instead (`UpscaleModelLoader` → `ImageUpscaleWithModel`):
+put a weight such as `RealESRGAN_x4.pth` in ComfyUI `models/upscale_models/`,
+verify with `check_model(name=..., kind="upscale")`, then pass `upscale=4`.
+The model is auto-picked when `upscale_model` is omitted; with no weight
+installed the call degrades to `upscale=1` instead of failing.
+`result.output_width`/`output_height` report the REAL written pixel size.
+
+**Variants and contact sheets (v0.8).** `variants=4` renders four independent
+seeds in one call (`<stem>.png`, `<stem>-v2.png`, ...) and returns them in
+`result.assets`. Add `contact_sheet=true` (needs `variants >= 2`) to also get
+a `<stem>-sheet.png` grid plus a deterministic `<stem>-sheet.json` manifest —
+one image to compare candidates instead of opening four files.
 Patterns/hoa văn: `category="pattern"` (or `texture`) +
 `style_preset="pattern"` + `seamless=true` → an edge-cross-faded tileable
 image plus a `<stem>-tile.png` 2x2 preview (`width`/`height` max 1024).
@@ -134,12 +156,17 @@ Every generated base PNG carries tEXt metadata (`software`, `prompt`,
 to its exact parameters.
 
 CI: `.github/workflows/ci.yml` runs the full CPU-only suite on
-ubuntu + windows × Python 3.11/3.13 for every push/PR.
+ubuntu + windows × Python 3.11/3.13 for every push/PR, plus an `install` job
+that proves the distribution: editable install, `asset-gen --help`,
+`--selftest`, and a wheel build that asserts the workflow JSONs and setup
+notes actually ship.
 
 ## Verify
 
 ```bash
-pytest tests/ -q   # 391 passed + environment-conditional skips on a full env
+python -m pytest tests -q   # 619 passed + env-conditional skips (v0.8.0)
+pytest tests -q             # same (repo-root conftest.py bootstraps sys.path)
+python asset-gen.py --selftest
 ```
 
 `server_info` unreachable never errors (`reachable:false`); generation without
@@ -149,7 +176,9 @@ ComfyUI maps to `BACKEND_UNAVAILABLE` — both covered by tests.
 
 - `src/mcp_server/` — FastMCP tools, validation, orchestration, OpenCode wiring doc
 - `src/gen_backend/` — ComfyUI adapter (submit/poll/fetch/cancel) + pinned API-format workflows
-- `src/postprocess/` — `rembg` removal, trim/pad, multi-res, icon sizes, `.ico` export
+- `src/postprocess/` — `rembg` removal, trim/pad, palette/symmetry/seamless, multi-res, icon sizes, `.ico`, SVG tracing, contact sheets
+- `fixtures/fake_comfyui.py` — stdlib fake ComfyUI (no GPU) used by the integration tests
+- `pyproject.toml` / `PACKAGING.md` — installable packaging (console script, single-source version)
 - `examples/react/` — sample `UserProfile.tsx` + layout README
 - `docs/` — architecture, interface contracts, setup guides
 - `fixtures/`, `tests/` — canned payloads + suites

@@ -5,6 +5,78 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 Copy the relevant entry into the GitHub Release notes when tagging.
 
+## [v0.8.0] — 2026-11-08 (tag: `v0.8.0`)
+
+Minor release. Contract: C1 v0.8 (upscale + variants/contact sheet),
+C2 v0.3 (upscale node chain), C3 v0.6 (resize target + contact sheet).
+Additive only — every v0.7 input/output keeps its shape and meaning.
+
+### Added
+- **Real model upscale on `generate_app_asset`** (C1 v0.8 / C2 v0.3, P1):
+  new `upscale: 1|2|4` inserts a real ComfyUI upscale pass
+  (`UpscaleModelLoader` node 14 → `ImageUpscaleWithModel` node 15 →
+  `SaveImage`) before the PNG is fetched, so `@2x/@3x` are sized off
+  model-upscaled pixels instead of being Lanczos copies of a 512 px
+  render. New `upscale_model` picks the weight inside ComfyUI
+  `models/upscale_models/` (auto-picked when omitted); with no weight
+  installed the call degrades to `upscale=1` rather than failing.
+  `check_model` gains kind `"upscale"`.
+- **Variants and contact sheets** (C1 v0.8 / C3 v0.6, P2): `variants: 1..8`
+  renders N independent seeds in one call (`<stem>.png`, `<stem>-v2.png`, …)
+  and reports them in the new `assets[]` output; `contact_sheet: true`
+  (needs `variants >= 2`) composes a `<stem>-sheet.png` grid plus a
+  deterministic `<stem>-sheet.json` manifest.
+- **`resize_to` in the postprocess pipeline** (C3 v0.6): optional exact
+  `(w, h)` target applied after background removal and before trim/pad, so
+  every derived entry is sized off the final base. `None` is a no-op.
+- **Installable distribution** (P3): `pyproject.toml` (setuptools src
+  layout, dynamic version from `mcp_server.config.SERVER_VERSION`, package
+  data for the workflow JSONs + setup notes), `asset-gen` console script,
+  and `PACKAGING.md`.
+- **`asset-gen.py --selftest`**: offline end-to-end self-check (no ComfyUI,
+  no GPU, no rembg model) that enumerates the tools and drives a
+  generate/refine/server_info/check_model round trip against stubs.
+- **Runnable fake ComfyUI** (`fixtures/fake_comfyui.py`, stdlib only):
+  serves `/prompt`, `/queue`, `/history`, `/view`, `/upload/image`,
+  `/interrupt`, `/object_info`, `/system_stats`; the integration tests now
+  drive the REAL client + orchestrator + postprocess against it.
+- **Repo-root `conftest.py`**: `pytest tests -q` (the command the README
+  documented) now works; previously it failed with 11
+  `ModuleNotFoundError: No module named 'src'` collection errors.
+
+### Changed
+- **Version bumped `0.6.0 → 0.8.0`** in `config.py` and all three package
+  `__init__.py` files; `server_info.version` and the PNG `software` tEXt
+  tag now report 0.8.0.
+- `result.width`/`height` keep the C1 meaning (the REQUESTED render size);
+  the new `output_width`/`output_height` report the REAL written pixel
+  size, which trim/pad can change.
+- `ComfyClient.loader_files` parses both `/object_info` option shapes — the
+  legacy `[[names], {...}]` list and the newer
+  `["COMBO", {"options": [...]}]` combo that ComfyUI 0.41.0 serves for
+  `UpscaleModelLoader`; `UpscaleModelLoader` joins `ALLOWED_LOADERS`.
+- `opencode.json` now wires the `asset-gen.py` launcher with no pinned
+  `cwd`, matching the documented recommendation (the pinned form made the
+  asset jail resolve to the MCP checkout).
+- CI gains an `install` job: editable install, `asset-gen --help`,
+  `--selftest`, and a wheel build asserting the package data ships.
+- `SERVER_INSTRUCTIONS` updated for the new inputs and kept under the
+  4 KB budget (tested).
+
+### Verified
+- 619 passed + 2 env-conditional skips + 11 subtests (venv, Python 3.13,
+  Windows) via BOTH `python -m pytest tests -q` and `pytest tests -q`.
+- Clean-room proof in a brand-new venv: `pip install -r
+  requirements-dev.txt` resolves with `pip check` → *No broken requirements
+  found.*, `pip install --no-deps -e .` installs version 0.8.0, the
+  `asset-gen` console script works, `--selftest` exits 0, and the full
+  suite passes (619/2/11).
+- LIVE on RTX 3080 (10.7 GB) + ComfyUI 0.41.0: `upscale=4` with
+  `RealESRGAN_x4.pth` returned a real 2048×2048 render (postprocess base
+  1597×1584 after trim; `output_width`/`output_height` match the written
+  file exactly); `variants=3, contact_sheet=true` wrote three seeded
+  variants plus a 1048×1048 sheet and a manifest listing all three.
+
 ## [Unreleased]
 
 ### Added

@@ -46,6 +46,14 @@ from .presets import (
     list_models,
     list_styles,
 )
+from .upscale import (
+    UPSCALE_FACTORS,
+    UPSCALE_NODE_MAP,
+    inject_upscale,
+    resolve_upscale_model,
+    validate_upscale_factor,
+    validate_upscale_model,
+)
 
 _WORKFLOWS_DIR = _os.path.join(_os.path.dirname(__file__), "workflows")
 
@@ -69,8 +77,9 @@ def submit_txt2img(client, prompt, workflow_id=DEFAULT_WORKFLOW_ID,
                    width=DEFAULT_SIZE, height=DEFAULT_SIZE,
                    steps=DEFAULT_STEPS, seed=None, model_id=None,
                    style=None, negative=None, guidance=FIXED_GUIDANCE,
-                   client_id=None, lora=None, lora_strength=None):
-    """C2 ``submit_txt2img`` -> build + inject -> ``ComfyClient.submit``.
+                   client_id=None, lora=None, lora_strength=None,
+                   upscale=1, upscale_model=None):
+    """C2 ``submit_txt2img`` -> build + inject (+ upscale) -> ``ComfyClient.submit``.
 
     C2 op ``submit_txt2img({prompt, ...})`` maps to this helper, which calls
     ``presets.build_txt2img_params`` + ``presets.inject_params`` and then
@@ -78,6 +87,13 @@ def submit_txt2img(client, prompt, workflow_id=DEFAULT_WORKFLOW_ID,
     (ComfyUI ``prompt_id``). ``model_id`` omitted derives from ``workflow_id``.
     ``lora``/``lora_strength`` (optional, C2 v0.2) wire a LoraLoaderModelOnly
     node through the model chain; the file must exist in ``models/loras/``.
+
+    ``upscale`` (C2 v0.3 / P1): ``1`` (default) submits the graph unchanged;
+    ``2``/``4`` splice an ``ImageUpscaleWithModel`` pass before SaveImage via
+    :func:`upscale.inject_upscale`, so ComfyUI returns upscaled pixels
+    instead of the postprocessor enlarging a small render. ``upscale_model``
+    is the basename inside ComfyUI ``models/upscale_models/`` and is
+    required when ``upscale > 1`.
     """
     params = build_txt2img_params(
         prompt=prompt, negative=negative, workflow_id=workflow_id,
@@ -87,6 +103,17 @@ def submit_txt2img(client, prompt, workflow_id=DEFAULT_WORKFLOW_ID,
     )
     workflow = _load_workflow(params["workflow_id"])
     prompt_dict = inject_params(workflow, params)
+    factor = validate_upscale_factor(upscale)
+    if factor != 1:
+        model_name = validate_upscale_model(upscale_model)
+        if model_name is None:
+            raise ValueError(
+                "INVALID_UPSCALE_MODEL: upscale_model is required when "
+                "upscale is %r" % (factor,)
+            )
+        prompt_dict = inject_upscale(
+            prompt_dict, factor=factor, model_name=model_name
+        )
     return client.submit(prompt_dict, client_id=client_id)
 
 
@@ -157,8 +184,14 @@ __all__ = [
     "build_img2img_params",
     "inject_img2img",
     "load_input_bytes",
+    "UPSCALE_FACTORS",
+    "UPSCALE_NODE_MAP",
+    "inject_upscale",
+    "resolve_upscale_model",
+    "validate_upscale_factor",
+    "validate_upscale_model",
     "submit_txt2img",
     "submit_img2img",
 ]
 
-__version__ = "0.6.0"
+__version__ = "0.8.0"

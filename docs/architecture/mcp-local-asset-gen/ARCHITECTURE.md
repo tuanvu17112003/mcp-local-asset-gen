@@ -1,8 +1,12 @@
 # Architecture — mcp-local-asset-gen
 
 Project: `mcp-local-asset-gen` (alt: `opencode-asset-designer`).
-Status: Refined draft v0.2 (2026-10-17 quick research) — user decisions
-Q1–Q5 recorded in master plan; contracts still unfrozen until dispatch.
+Status: AS-BUILT at release v0.8.0 (2026-11-08). The original refined draft
+(2026-10-17) below is retained as the design record; the contracts are frozen
+(C1 v0.8, C2 v0.3, C3 v0.6 — hashes verified by `scripts/hash_contract.py`)
+and §3's "refined 2026-10-17; freeze at dispatch" plan is HISTORICAL: FastMCP
+is pinned to 4.1.3, SVG is shipped (not deferred), and the OpenCode wiring is
+the `asset-gen.py` launcher with no pinned `cwd`.
 Research: `docs/research/mcp-local-asset-gen-quick-research-2026-10-17.md`.
 
 ## 1. Goal

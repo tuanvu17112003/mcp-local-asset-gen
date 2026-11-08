@@ -216,6 +216,48 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
                 "default": 1.0,
                 "description": "LoRA strength (0 < s <= 2; requires lora).",
             },
+            "upscale": {
+                "type": "integer",
+                "enum": [1, 2, 4],
+                "default": 1,
+                "description": (
+                    "C1 v0.8 (P1): run a REAL ComfyUI model-upscale pass "
+                    "before postprocessing. 1 = off; 2/4 splice an "
+                    "ImageUpscaleWithModel node. Degrades to 1 when no "
+                    "model is installed (check result.upscale)."
+                ),
+            },
+            "upscale_model": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "Basename of the upscale weight in ComfyUI "
+                    "models/upscale_models/ (e.g. RealESRGAN_x4.pth). "
+                    "Omit to auto-pick the first installed model; "
+                    "check_model kind 'upscale' verifies."
+                ),
+            },
+            "variants": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8,
+                "default": 1,
+                "description": (
+                    "C1 v0.8 (P2): render N independent seeds in one "
+                    "call (<stem>-v2..vN get the extra siblings; the "
+                    "requested save_path is variant 1). Referenced by "
+                    "result.assets[]."
+                ),
+            },
+            "contact_sheet": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "C1 v0.8 (P2): when variants >= 2, also compose a "
+                    "single grid image (<stem>-sheet.png) plus a JSON "
+                    "manifest (<stem>-sheet.json) listing every variant."
+                ),
+            },
         },
     },
     "output_schema": {
@@ -230,6 +272,11 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
             "seed",
             "style_preset",
             "job_id",
+            "upscale",
+            "output_width",
+            "output_height",
+            "variants",
+            "assets",
         ],
         "properties": {
             "asset_path": {"type": "string"},
@@ -241,6 +288,31 @@ GENERATE_APP_ASSET_SCHEMA: Dict[str, Any] = {
             "seed": {"type": "integer"},
             "style_preset": {"type": "string"},
             "job_id": {"type": "string"},
+            "upscale": {"type": "integer"},
+            "output_width": {"type": "integer"},
+            "output_height": {"type": "integer"},
+            "variants": {"type": "integer"},
+            "assets": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": [
+                        "index",
+                        "seed",
+                        "asset_path",
+                        "asset_path_absolute",
+                    ],
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "seed": {"type": "integer"},
+                        "asset_path": {"type": "string"},
+                        "asset_path_absolute": {"type": "string"},
+                    },
+                },
+            },
+            "contact_sheet_path": {"type": ["string", "null"]},
+            "contact_sheet_path_absolute": {"type": ["string", "null"]},
+            "contact_sheet_manifest_path": {"type": ["string", "null"]},
         },
     },
 }
@@ -415,6 +487,7 @@ CHECK_MODEL_SCHEMA: Dict[str, Any] = {
                     "unet",
                     "vae",
                     "lora",
+                    "upscale",
                 ],
                 "description": "Optional model kind to narrow the search (maps to ComfyUI loader nodes; default: all).",
             },

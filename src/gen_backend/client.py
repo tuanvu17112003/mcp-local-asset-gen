@@ -61,7 +61,7 @@ _WS_ENDPOINT = "/ws"
 # v0.7 adds "lora" (LoraLoaderModelOnly -> models/loras/).
 ALLOWED_LOADERS = frozenset(
     {"UnetLoaderGGUF", "DualCLIPLoader", "VAELoader", "CheckpointLoaderSimple",
-     "LoraLoaderModelOnly"}
+     "LoraLoaderModelOnly", "UpscaleModelLoader"}
 )
 
 SUBMIT_TIMEOUT_S = 5.0  # contract: submit timeout 5 s
@@ -274,6 +274,36 @@ def _scan_inputs(obj: Any, keys: Tuple[str, ...], depth: int = 0) -> Dict[str, A
             for key, val in _scan_inputs(value, keys, depth + 1).items():
                 found.setdefault(key, val)
     return found
+
+
+def _combo_names(spec: Any) -> Optional[List[str]]:
+    '''Return the filename options carried by one ``/object_info`` input spec.
+
+    ComfyUI has two shapes for a file-list input and both are live today:
+
+    * legacy -- ``[["a.gguf", "b.gguf"], {...}]``: the option list is the
+      first element;
+    * combo -- ``["COMBO", {"options": ["x.pth", ...]}]``: newer core
+      nodes (``UpscaleModelLoader`` on ComfyUI 0.41.0, verified live)
+      moved the list into the option dict.
+
+    Returns the list of names, or ``None`` when the spec is neither shape
+    (so the caller can skip non-file inputs such as a numeric option).
+    Never raises on unexpected structures.
+    '''
+    if not isinstance(spec, list) or not spec:
+        return None
+    head = spec[0]
+    if isinstance(head, list) and all(isinstance(item, str) for item in head):
+        return list(head)
+    if isinstance(head, str) and head.upper() == "COMBO" and len(spec) > 1:
+        options = spec[1].get("options") if isinstance(spec[1], dict) else None
+        if isinstance(options, list) and all(
+            isinstance(item, str) for item in options
+        ):
+            return list(options)
+        return []
+    return None
 
 
 class ComfyClient:
@@ -694,17 +724,13 @@ class ComfyClient:
             return {}
         files: Dict[str, List[str]] = {}
         for input_name, spec in required.items():
-            # File-list convention across all four allowlisted loaders
+            # File-list convention across all allowlisted loaders
             # (verified live 2026-10-18): every file input carries "_name"
             # (unet_name, clip_name1/2, vae_name, ckpt_name); non-file
             # option lists such as DualCLIPLoader "type" do not.
             if "_name" not in input_name:
                 continue
-            if (
-                isinstance(spec, list)
-                and spec
-                and isinstance(spec[0], list)
-                and all(isinstance(item, str) for item in spec[0])
-            ):
-                files[input_name] = list(spec[0])
+            names = _combo_names(spec)
+            if names is not None:
+                files[input_name] = names
         return files

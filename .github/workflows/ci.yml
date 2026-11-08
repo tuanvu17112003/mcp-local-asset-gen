@@ -1,6 +1,8 @@
 # CI for mcp-local-asset-gen: the suite is CPU-only (fake backend + canned
 # fixtures), so every push/PR runs it on both OS families — the path jail has
-# NTFS-specific branches that only Windows runners exercise.
+# NTFS-specific branches that only Windows runners exercise. A second job
+# proves the DISTRIBUTION is installable (console script, --selftest, wheel
+# contents), which the source-tree test run cannot cover.
 name: CI
 
 on:
@@ -27,3 +29,55 @@ jobs:
         run: pip check
       - name: Run tests
         run: python -m pytest tests/ -q
+
+  install:
+    # Packaging gate: editable install resolves the dynamic version from
+    # mcp_server/config.py, the console script works, the offline selftest
+    # passes, and the built wheel actually ships the workflow JSONs +
+    # setup_notes markdown (a source-tree run cannot see that regression).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install runtime + dev dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Install the project (editable, no dependency re-resolution)
+        run: pip install --no-deps -e .
+      - name: pip check
+        run: pip check
+      - name: Console script help
+        run: asset-gen --help
+      - name: Offline selftest (no ComfyUI, no GPU, no rembg model)
+        run: python asset-gen.py --selftest
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel --outdir dist
+      - name: Assert wheel ships workflows + setup notes
+        shell: python
+        run: |
+          import glob
+          import zipfile
+
+          wheels = glob.glob("dist/*.whl")
+          assert len(wheels) == 1, wheels
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
+          required = {
+              "gen_backend/workflows/txt2img-flux-schnell-gguf-q4.json",
+              "gen_backend/workflows/txt2img-flux-schnell-fp8.json",
+              "gen_backend/setup_notes.md",
+              "postprocess/setup_notes.md",
+              "mcp_server/server.py",
+          }
+          missing = sorted(required - names)
+          assert not missing, "wheel is missing package data: %s" % (missing,)
+          entry_points = [n for n in names if n.endswith("entry_points.txt")]
+          assert entry_points, "wheel has no entry_points.txt"
+          payload = ""
+          with zipfile.ZipFile(wheels[0]) as archive:
+              payload = archive.read(entry_points[0]).decode("utf-8")
+          assert "asset-gen = mcp_server.server:main" in payload, payload
+          print("wheel OK:", wheels[0], "entries:", len(names))

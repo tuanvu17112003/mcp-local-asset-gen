@@ -35,3 +35,8 @@ Thumbs.db
 *.log
 # Helper-script outputs live outside the repo; nothing to ignore here.
 .codegraph/
+# Local Windows sandbox artifact (path literal, never part of the project)
+/%SystemDrive%/
+
+# Local, unreferenced sample renders
+assets/branding/

@@ -51,8 +51,8 @@ SERVER_NAME = "asset-gen"
 #: required to do so — the text is written to stay useful however it is
 #: presented (system prompt, preamble, or on-demand reference).
 SERVER_INSTRUCTIONS = """\
-# asset-gen — local AI asset generation (5 tools): local ComfyUI + rembg
-pipeline for app assets (icons, illustrations, avatars, patterns). No cloud.
+# asset-gen — local AI asset generation (5 tools): ComfyUI + rembg for app
+assets (icons, illustrations, avatars, patterns). No cloud.
 
 Tools — call exactly these, with these shapes:
 - generate_app_asset({prompt*, category*, save_path*, width=512,
@@ -60,62 +60,62 @@ Tools — call exactly these, with these shapes:
   overwrite=false, job_id=null, icon_sizes=null, ico=false,
   workspace="default", include_image=false, seamless=false, palette=null,
   symmetry=null, negative=null, remove_bg_model=null, lora=null,
-  lora_strength=1}): text-to-image, transparent PNG (+@2x/@3x) written
-  under save_path. remove_bg defaults true for icon/avatar;
-  remove_bg_model: u2net (default) | isnet-general-use | birefnet-general
-  | birefnet-general-lite. lora: a models/loras/ filename (must exist;
-  check_model kind "lora"; 0 < lora_strength <= 2; server bundles no
-  weights). icon_sizes e.g. [32,64]; ico:true adds .ico.
-  format:"svg" traces a vector asset (leaf must be <stem>.svg; only that
-  file written). include_image:true attaches the @1x PNG as an image
-  block. width/height max 1024. seamless:true makes a tileable pattern
-  (cross-fade + 2x2 preview; pair with category pattern/texture +
-  style_preset "pattern"). palette:["#hex",…] (2-8) recolors to EXACT
-  brand colors; symmetry "mirror-x"|"mirror-quad"|"radial:<n>" (2-12).
+  lora_strength=1, upscale=1, upscale_model=null, variants=1,
+  contact_sheet=false}): txt2img -> transparent PNG (+@2x/@3x) at
+  save_path. remove_bg: default true for icon/avatar; remove_bg_model
+  u2net (default)|isnet-general-use|birefnet-general|birefnet-general-lite.
+  lora: models/loras/ filename (check_model kind "lora"; 0<s<=2; none
+  bundled). icon_sizes e.g. [32,64]; ico:true adds .ico. format:"svg"
+  traces vector (leaf <stem>.svg, only that file). include_image:true
+  attaches the @1x PNG as an image block. width/height max 1024.
+  upscale 1|2|4 = REAL ComfyUI upscale pass (model auto-picked from
+  models/upscale_models/; none installed -> stays 1, see result.upscale);
+  output_width/height = real size. variants 1-8 = N seeds written
+  <stem>-v2..N; contact_sheet:true (needs variants>=2) also writes
+  <stem>-sheet.png + .json. seamless:true = tileable pattern (cross-fade
+  + 2x2 preview; pair with category pattern/texture + style "pattern").
+  palette:["#hex",…] 2-8 = EXACT brand colors; symmetry
+  "mirror-x"|"mirror-quad"|"radial:<n>" (2-12).
 - refine_asset({instruction*, asset_id|asset_path, save_path, strength=0.6,
   job_id=null, workspace="default", include_image=false, remove_bg=false,
-  remove_bg_model=null}): image-to-image tweak; writes a NEW file, never
-  mutates the parent (default <stem>_refined.png). source PNG uploaded
-  automatically; remove_bg:true strips the background. strength (0,1]:
-  recolors/restyles need >=0.7; 0.4-0.6 only nudges details.
+  remove_bg_model=null}): img2img tweak; NEW file, parent never mutated
+  (default <stem>_refined.png). source PNG uploaded automatically.
+  strength (0,1]: >=0.7 to recolor/restyle, 0.4-0.6 nudges details.
 - cancel_asset_job({job_id*}): interrupt a running job; {cancelled,
   status: cancelling|completed|unknown}.
-- check_model({name*, kind}): is a weight file present in a ComfyUI
-  loader? kind in unet|clip|vae|checkpoint|lora (default all). Use
-  before generating.
+- check_model({name*, kind}): weight file present in a ComfyUI loader?
+  kind unet|clip|vae|checkpoint|lora|upscale (default all). Use before
+  generating.
 - server_info({}): {backend, comfyui_url, models, version, project_root,
   workspaces, allow_any_path, reachable, queue_depth}. Call FIRST; if
   reachable=false, do not generate.
 
-Workflow: server_info → check_model (non-default weights) →
-generate_app_asset → embed asset_path → refine_asset to iterate.
+Workflow: server_info → check_model → generate_app_asset → embed
+asset_path → refine_asset to iterate.
 
 Rules: YOU choose the output path.
-- save_path may be ABSOLUTE ("C:/proj/src/assets/icon.png") or relative:
-  absolute used exactly as given, relative resolves under the selected
-  workspace root.
+- save_path may be ABSOLUTE (e.g. "C:/proj/assets/icon.png", used exactly
+  as given) or relative (resolved under the selected workspace root).
 - Leaf must be lowercase .png (or .svg with format:"svg"), safe stem
-  [A-Za-z0-9._-]: the leaf names the written file; "icon.webp" refused
-  pre-backend (POLICY_DENIED INVALID_SAVE_PATH).
+  [A-Za-z0-9._-]: "icon.webp" refused (POLICY_DENIED INVALID_SAVE_PATH).
 - An absolute path must land inside an approved root (project_root or a
-  named workspace — see server_info.workspaces), checked on the RESOLVED
-  path. ".." traversal, NUL bytes, ':' (NTFS streams) and device names
-  (NUL, COM1, …) are not; backslashes are. --allow-any-path removes all
-  containment checks (opt-in, default off).
-- project_root defaults to the server's start directory (your workspace);
-  compare via server_info. A non-approved target tree needs a human
+  named workspace, see server_info.workspaces), checked on the RESOLVED
+  path. "..", NUL bytes, ':' and device names are not; backslashes are.
+  --allow-any-path removes all containment checks (default off).
+- project_root defaults to the server's start dir (your workspace):
+  compare via server_info. A non-approved tree needs a human
   (--workspace name=path).
-- Result: asset_path (relative to asset_root), asset_path_absolute,
-  asset_root (root owning the file). The base PNG embeds prompt/seed/
-  job_id as tEXt metadata.
+- Result: asset_path, asset_path_absolute, asset_root,
+  upscale/output_width/output_height/variants/assets (+ contact_sheet_*).
+  Base PNG embeds prompt/seed/job_id as tEXt metadata.
 Existing files need overwrite:true. Refine parents must exist. Max 2
-concurrent jobs (excess → QUEUED; reuse job_id for idempotent retry).
+concurrent jobs (excess -> QUEUED; reuse job_id for idempotent retry).
 
-Errors (CODE prefix; fix the cause, don't blindly retry):
-BACKEND_UNAVAILABLE (ComfyUI down); GENERATION_FAILED (covers
+Errors (CODE prefix; fix the cause, don't just retry):
+BACKEND_UNAVAILABLE (ComfyUI down); GENERATION_FAILED (incl.
 JOB_FAILED/JOB_TIMEOUT); POLICY_DENIED (bad path/overwrite); INVALID_*
-(bad args, pre-backend); POSTPROCESS_FAILED (includes LICENSE_REQUIRED:
-bria-rmbg is postprocess-internal opt-in — use the default model).
+(bad args, pre-backend); POSTPROCESS_FAILED (incl. LICENSE_REQUIRED:
+bria-rmbg is opt-in).
 
 Limits: localhost ComfyUI only (allow_remote opt-in); 512px default;
 postprocess trims/pads and center-crops icons.
@@ -325,6 +325,10 @@ def create_server(
         remove_bg_model: Optional[str] = None,
         lora: Optional[str] = None,
         lora_strength: Optional[float] = None,
+        upscale: int = 1,
+        upscale_model: Optional[str] = None,
+        variants: int = 1,
+        contact_sheet: bool = False,
     ) -> Dict[str, Any]:
         """Generate an app asset with local ComfyUI + postprocessing."""
         from .validation import validate_tool_args
@@ -355,6 +359,10 @@ def create_server(
                 remove_bg_model=remove_bg_model,
                 lora=lora,
                 lora_strength=lora_strength,
+                upscale=upscale,
+                upscale_model=upscale_model,
+                variants=variants,
+                contact_sheet=contact_sheet,
             )
             result = await asyncio.to_thread(
                 orchestrator.generate,

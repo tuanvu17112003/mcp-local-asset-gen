@@ -9,6 +9,17 @@ v0.1.1: sha256:AC9192C6…; v0.1.0: sha256:B21A372C…. v0.1.6 amendment
 roots — closing the v0.1.5 independent-review findings. User-requested
 chain; additive + behavior change; prior acks stand.)
 
+- v0.8 (2026-11-08, release v0.8.0) adds `upscale`/`upscale_model`/
+  `variants`/`contact_sheet` and the `upscale`/`output_width`/
+  `output_height`/`variants`/`assets`/`contact_sheet_*` outputs — see the
+  v0.8 addendum at the end of this file. Baselines v0.1.6 below are
+  retained for history; the current content hash is the value printed by
+  `scripts/hash_contract.py` (tracked in-repo since v0.8).
+- v0.8 content hash:
+  `sha256:FFD49605348D5BC5CDB098B985C26A33DC55AB1CD1B3C79124C3C3AAC3252BA5`
+  (SHA256 over the file's LF bytes with every `sha256:<64hex>` field
+  normalized out, self-hash excluded.)
+
 - v0.1.6 content hash:
   `sha256:9CA6D5AA9DE97D2323DD785CA27805442ED65A8DC852B1192C70B00038AE20BD`
   (SHA256 over the file's LF bytes with every `sha256:<64hex>` field
@@ -312,3 +323,42 @@ Additive to v0.6. Research: `docs/research/v06-features-research-2026-10-24.md`.
   `instruction`, `strength`, `parent_job_id`). Lossless re-encode,
   best-effort (undecodable bytes pass through unchanged). No input or
   output schema key changed.
+## Addendum v0.8 (2026-11-08) — real upscale pass; variants + contact sheet
+
+Additive to v0.7 (release v0.8.0). New inputs on `generate_app_asset` only;
+`refine_asset` is unchanged.
+
+- `upscale: 1 | 2 | 4` (default `1`): when `> 1` the C2 layer splices a
+  REAL ComfyUI model-upscale pass (`UpscaleModelLoader` node "14" ->
+  `ImageUpscaleWithModel` node "15" -> `SaveImage`) before the PNG is
+  fetched, so the returned pixels are model-upscaled rather than a
+  postprocess enlargement of a 512 px render. The pass is skipped (and
+  `result.upscale` reports `1`) when no upscale weight is installed, so a
+  call never fails for a missing model. `INVALID_UPSCALE` otherwise.
+- `upscale_model: string?`: plain basename inside ComfyUI
+  `models/upscale_models/` (no separators, no `..`; `INVALID_UPSCALE_MODEL`).
+  Omitted -> the first installed model is auto-picked via
+  `check_model(kind="upscale")` discovery. Supplying it with `upscale:1`
+  is refused (dead parameter).
+- `variants: 1..8` (default `1`): renders N independent seeds in ONE call.
+  Variant 1 is the requested `save_path`; the rest are siblings
+  `<stem>-v2.<ext>` ... `<stem>-vN.<ext>` in the same approved root, each
+  subject to the normal overwrite policy (`POLICY_DENIED` when a sibling
+  exists and `overwrite` is false). `INVALID_VARIANTS` otherwise.
+- `contact_sheet: boolean` (default `false`, requires `variants >= 2` —
+  `INVALID_CONTACT_SHEET`): additionally composes one grid image
+  `<stem>-sheet.png` (Pillow, aspect-preserving cells, transparent
+  background) plus `<stem>-sheet.json`, a deterministic manifest
+  (`{"schema": "asset-gen/contact-sheet/1", "count", "entries": [...]}`,
+  entries sorted by index, JSON-scalar extras only).
+- `check_model` gains kind `"upscale"` (`UpscaleModelLoader`).
+- New output keys on `generate_app_asset` (all additive; `width`/`height`
+  keep their existing meaning = the REQUESTED render size):
+  `upscale` (effective factor after degradation), `output_width` /
+  `output_height` (the REAL size of the written base PNG, post trim/pad),
+  `variants`, `assets` (one `{index, seed, asset_path,
+  asset_path_absolute}` entry per variant; index 0 is the requested
+  leaf), and — only when a sheet was requested — `contact_sheet_path`,
+  `contact_sheet_path_absolute`, `contact_sheet_manifest_path`.
+- Node-id ownership (C2): `11`/`12` img2img, `13` LoRA, `14`/`15`
+  upscale, `9` SaveImage. Re-injection reuses node 15 (no cycles).

@@ -1,0 +1,70 @@
+# Packaging metadata for mcp-local-asset-gen.
+#
+# Version is DYNAMIC on purpose: src/mcp_server/config.py:SERVER_VERSION is
+# the single source of truth, so no release version literal is ever duplicated
+# here (bumping the server version bumps the distribution version).
+#
+# Layout: the import packages are top-level modules living under src/
+# (mcp_server, gen_backend, postprocess) - there is deliberately NO "src"
+# package, so package-dir maps the root package to src/ and the packages are
+# listed explicitly. Non-Python assets (workflows/*.json, setup_notes.md) are
+# declared as package data so they ship in the wheel and the sdist.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-local-asset-gen"
+description = "Local MCP server for AI app assets: ComfyUI + rembg pipeline, no cloud."
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["version"]
+authors = [{ name = "mcp-local-asset-gen contributors" }]
+keywords = ["mcp", "comfyui", "assets", "icons", "stable-diffusion", "rembg"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+]
+# Runtime dependency pins: keep byte-identical to requirements.txt.
+# (rembg[cli] is intentionally NOT used: it pins python-multipart<0.0.22,
+# which fastmcp 4.1.3 cannot accept - see requirements.txt.)
+dependencies = [
+    "fastmcp==4.1.3",
+    "rembg[cpu]==2.0.85",
+    "Pillow==12.3.0",
+    "vtracer==0.6.15",
+    "websocket-client==1.9.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[project.scripts]
+asset-gen = "mcp_server.server:main"
+
+[project.urls]
+Homepage = "https://github.com/mcp-local-asset-gen/mcp-local-asset-gen"
+
+[tool.setuptools]
+packages = ["mcp_server", "gen_backend", "postprocess"]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "mcp_server.config.SERVER_VERSION" }
+
+# Shipped non-Python assets: the C2 API-format workflow JSONs and the
+# operator setup notes must be inside the wheel/sdist, not just the checkout.
+[tool.setuptools.package-data]
+gen_backend = ["workflows/*.json", "workflows/*.md", "setup_notes.md"]
+mcp_server = ["*.md"]
+postprocess = ["setup_notes.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

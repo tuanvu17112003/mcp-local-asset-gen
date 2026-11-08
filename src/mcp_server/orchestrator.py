@@ -48,6 +48,7 @@ colliding derived sibling) is refused with ``POLICY_DENIED``.
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import random
 import re
@@ -68,6 +69,7 @@ from .errors import (
 from .registry import JobRegistry
 from .validation import (
     CHECK_MODEL_LOADERS,
+    CONTACT_SHEET_CELL_PX,
     KIND_TO_LOADERS,
     _is_reserved_device_name,
     _is_within,
@@ -84,6 +86,13 @@ try:
     from src.postprocess.pipeline import process as _default_process
 except Exception:  # pragma: no cover - optional dep; tests/prod inject fakes
     _default_process = None
+
+try:  # C1 v0.8 P2 contact sheets (pure Pillow; optional at import time)
+    from src.postprocess.sheet import build_manifest as _build_manifest
+    from src.postprocess.sheet import compose_contact_sheet as _compose_sheet
+except Exception:  # pragma: no cover - optional dep; tests/prod inject fakes
+    _build_manifest = None
+    _compose_sheet = None
 
 #: C3 v0.1.1 icon scale labels: ``icon<N>`` with ``N >= 1`` (no leading
 #: zero). Size is derived from the entry's ``width``/``height``; the label
@@ -125,6 +134,10 @@ _GENERATE_FIELDS = (
     "symmetry",
     "negative",
     "remove_bg_model",
+    "upscale",
+    "upscale_model",
+    "variants",
+    "contact_sheet",
 )
 
 _REFINE_FIELDS = (
@@ -239,20 +252,34 @@ class AssetOrchestrator:
     def _submit_txt2img(
         self, *, prompt: str, width: int, height: int, seed: Any, style: str,
         negative: Any = None, lora: Any = None, lora_strength: Any = None,
+        upscale: Any = 1, upscale_model: Any = None,
     ) -> str:
-        """Submit txt2img via the stub method or ONLY the C2 thin helper."""
+        """Submit txt2img via the stub method or ONLY the C2 thin helper.
+
+        ``upscale``/``upscale_model`` (C1 v0.8 / P1) are forwarded to the
+        helper that splices the ComfyUI upscale chain; a stub that does not
+        accept them keeps working (the kwargs are filtered by signature, so
+        fakes stay simple and ``upscale=1`` is a no-op anyway).
+        """
         if callable(self._txt2img):
             # Only pass optional kwargs the stub actually accepts (strict
-            # fake signatures must keep working).
+            # fake signatures must keep working). A stub declaring
+            # **kwargs accepts all of them.
             accepted = inspect.signature(self._txt2img).parameters
+            permissive = any(
+                param.kind is inspect.Parameter.VAR_KEYWORD
+                for param in accepted.values()
+            )
             extra = {
                 key: value
                 for key, value in (
                     ("negative", negative),
                     ("lora", lora),
                     ("lora_strength", lora_strength),
+                    ("upscale", upscale),
+                    ("upscale_model", upscale_model),
                 )
-                if key in accepted
+                if permissive or key in accepted
             }
             return self._txt2img(
                 prompt=prompt, width=width, height=height, seed=seed, style=style,
@@ -263,6 +290,11 @@ class AssetOrchestrator:
         except ImportError:  # package layout (checkout root on sys.path)
             from src.gen_backend import submit_txt2img as submit_helper
 
+        kwargs: Dict[str, Any] = {}
+        accepted = inspect.signature(submit_helper).parameters
+        for key, value in (("upscale", upscale), ("upscale_model", upscale_model)):
+            if key in accepted:
+                kwargs[key] = value
         return submit_helper(
             self._backend,
             prompt=prompt,
@@ -273,7 +305,34 @@ class AssetOrchestrator:
             negative=negative,
             lora=lora,
             lora_strength=lora_strength,
+            **kwargs,
         )
+
+    def _resolve_upscale_model(self, requested: Any) -> Optional[str]:
+        """Pick the upscale model for this call (P1, C1 v0.8).
+
+        An explicit ``upscale_model`` wins as-is. Otherwise the live
+        ``UpscaleModelLoader`` file list is queried through the backend and
+        the first installed name is used; ``None` means "nothing installed",
+        which makes :meth:`generate` fall back to ``upscale=1`` instead of
+        submitting a graph that references a missing weight file.
+
+        Failures while listing models are swallowed on purpose: model
+        discovery must never break a generation that would otherwise work.
+        """
+        try:
+            from .validation import _check_upscale_model  # local import, no cycle
+        except Exception:  # pragma: no cover - defensive
+            return requested
+        cleaned = _check_upscale_model(requested)
+        if cleaned is not None:
+            return cleaned
+        try:
+            raw = self._fetch_loader_files("UpscaleModelLoader")
+        except Exception:
+            return None
+        names = [name for name in _flatten_loader_names(raw) if isinstance(name, str)]
+        return names[0] if names else None
 
     def _submit_img2img(
         self, *, input_png_path: str, instruction: str, strength: float
@@ -469,7 +528,9 @@ class AssetOrchestrator:
                 _val = entry[_dim]
                 if _dim == "scale" and _is_ico and _val == "ico":
                     continue
-                if _dim == "scale" and _val == "svg":
+                if _dim == "scale" and _val in ("svg", "sheet"):
+                    # C3 v0.2 SVG entries and C1 v0.8 contact-sheet /
+                    # manifest entries carry a label, not a pixel scale.
                     continue
                 if (
                     _dim == "scale"
@@ -533,6 +594,135 @@ class AssetOrchestrator:
         if owner is None:
             return Path(target_abs).as_posix()
         return Path(os.path.relpath(target_abs, owner)).as_posix()
+
+    # -- P2 variants + contact sheet (C1 v0.8) --------------------------------
+
+    @staticmethod
+    def _variant_targets(
+        target: Path,
+        variants: int,
+        effective_root: Any,
+        approved_roots: Any,
+        args: Dict[str, Any],
+    ) -> list:
+        """Resolve the write target for every requested variant.
+
+        ``variants == 1`` returns the already-jailed ``target`` unchanged, so
+        the single-image path stays byte-identical to pre-v0.8 behaviour.
+        Otherwise the siblings are ``<stem>-v1.<ext>`` ... ``<stem>-vN.<ext>``
+        beside ``target`` (same directory, same approved root). Every sibling
+        is re-checked against the jail and the overwrite policy here, because
+        ``resolve_save_path`` only vetted the base leaf.
+        """
+        if variants <= 1:
+            return [target]
+        suffix = target.suffix or (".svg" if args["format"] == "svg" else ".png")
+        planned = [target]
+        for index in range(2, variants + 1):
+            planned.append(target.with_name(f"{target.stem}-v{index}{suffix}"))
+        if not args.get("overwrite"):
+            for candidate in planned:
+                if os.path.exists(os.fspath(candidate)):
+                    raise PolicyDeniedError(
+                        "POLICY_DENIED INVALID_OVERWRITE: variant file exists and "
+                        "overwrite is not set, got %r" % (os.fspath(candidate),)
+                    )
+        return planned
+
+    def _write_contact_sheet(
+        self,
+        written: Any,
+        target: Path,
+        approved_roots: Any,
+        args: Dict[str, Any],
+    ) -> Optional[Dict[str, str]]:
+        """Compose + write the P2 contact sheet and its JSON manifest.
+
+        Returns ``{asset_path, asset_path_absolute, manifest_asset_path}``
+        or ``None`` when the P2 helpers are unavailable (Pillow missing).
+        The sheet is written beside ``target`` as ``<stem>-sheet.png``; the
+        manifest sidecar is ``<stem>-sheet.json``. Both go through
+        :meth:`_write_files` so the same jail + filename checks apply.
+        """
+        if _compose_sheet is None or _build_manifest is None:
+            return None
+        base_pngs: list = []
+        entries: list = []
+        for index, item in enumerate(written, start=1):
+            base = next(
+                (
+                    entry.get("png_bytes")
+                    for entry in item["files"]
+                    if isinstance(entry, dict)
+                    and entry.get("filename") == f"{item['stem']}.png"
+                ),
+                None,
+            )
+            if base is None:
+                continue
+            base_pngs.append(bytes(base))
+            entries.append(
+                {
+                    "index": index,
+                    "filename": f"{item['stem']}.png",
+                    "seed": item["seed"],
+                }
+            )
+        if len(base_pngs) < 2:
+            raise PostprocessFailedError(
+                "POSTPROCESS_FAILED: contact_sheet needs at least two base PNGs"
+            )
+        try:
+            sheet = _compose_sheet(
+                base_pngs,
+                cell_px=CONTACT_SHEET_CELL_PX,
+            )
+        except ValueError as exc:
+            raise PostprocessFailedError(
+                "POSTPROCESS_FAILED: contact sheet failed: %s" % (exc,)
+            ) from exc
+        sheet_name = f"{target.stem}-sheet.png"
+        manifest_name = f"{target.stem}-sheet.json"
+        self._write_files(
+            [
+                {
+                    "filename": sheet_name,
+                    "png_bytes": sheet["png_bytes"],
+                    "width": sheet["width"],
+                    "height": sheet["height"],
+                    "scale": "sheet",
+                }
+            ],
+            target,
+            approved_roots,
+            allow_any_path=self._allow_any_path(),
+        )
+        manifest = _build_manifest(
+            entries,
+            sheet={
+                "filename": sheet_name,
+                "width": sheet["width"],
+                "height": sheet["height"],
+                "columns": sheet["columns"],
+                "rows": sheet["rows"],
+                "cell_px": sheet["cell_px"],
+            },
+        )
+        blob = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+        self._write_files(
+            [{"filename": manifest_name, "png_bytes": blob, "scale": "sheet"}],
+            target,
+            approved_roots,
+            allow_any_path=self._allow_any_path(),
+        )
+        sheet_target = target.with_name(sheet_name)
+        return {
+            "asset_path": self._relative_posix(sheet_target, approved_roots),
+            "asset_path_absolute": os.fspath(sheet_target),
+            "manifest_asset_path": self._relative_posix(
+                target.with_name(manifest_name), approved_roots
+            ),
+        }
 
     # -- public flows ----------------------------------------------------------
 
@@ -618,52 +808,133 @@ class AssetOrchestrator:
                 allow_any_path=self._allow_any_path(),
                 fmt=args["format"],
             )
-            self._emit(progress, 0, 4, "submitting workflow to ComfyUI")
-            backend_job_id = self._submit_txt2img(
-                prompt=args["prompt"],
-                width=args["width"],
-                height=args["height"],
-                seed=args["seed"],
-                style=STYLE_TO_BACKEND[args["style_preset"]],
-                negative=args.get("negative"),
-                lora=args.get("lora"),
-                lora_strength=args.get("lora_strength"),
+            upscale = int(args.get("upscale") or 1)
+            upscale_model = None
+            if upscale > 1:
+                # P1: only splice the ComfyUI upscale chain when a model is
+                # actually installed; otherwise degrade to upscale=1 instead
+                # of submitting a graph that references a missing weight.
+                upscale_model = self._resolve_upscale_model(args.get("upscale_model"))
+                if upscale_model is None:
+                    upscale = 1
+            output_width = args["width"] * upscale
+            output_height = args["height"] * upscale
+            variants = int(args.get("variants") or 1)
+            variant_targets = self._variant_targets(
+                target, variants, effective_root, approved_roots, args
             )
-            self._track_job(jid, backend_job_id)
-            self._emit(progress, 1, 4, "generating on ComfyUI (job %s)" % backend_job_id)
-            fetched = self._fetch_png_and_seed(backend_job_id, progress)
-            self._untrack_job(jid)
-            seed = args["seed"]
-            if seed is None:
-                seed = fetched.get("seed")
-            if seed is None:  # neither caller nor backend supplied one (mirrors C2)
-                seed = random.randint(0, 0xFFFFFFFF)
-            stem = Path(args["save_path"].replace("\\", "/")).stem
-            self._emit(progress, 2, 4, "postprocessing (remove_bg, trim, exports)")
-            try:
-                processed = self._postprocess(
-                    bytes(fetched["png_bytes"]),
-                    remove_bg=args["remove_bg"],
-                    model=args["remove_bg_model"],
-                    trim=True,
-                    sizes=(1, 2, 3),
-                    stem=stem,
-                    vectorize=args["format"] == "svg",
-                    icon_sizes=args.get("icon_sizes"),
-                    ico=args.get("ico", False),
-                    seamless=args.get("seamless", False),
-                    palette=args.get("palette"),
-                    symmetry=args.get("symmetry"),
+            processed_variants: list = []
+            for index, variant_target in enumerate(variant_targets):
+                seed = args["seed"] if index == 0 else None
+                self._emit(progress, 0, 4, "submitting workflow to ComfyUI")
+                backend_job_id = self._submit_txt2img(
+                    prompt=args["prompt"],
+                    width=args["width"],
+                    height=args["height"],
+                    seed=seed,
+                    style=STYLE_TO_BACKEND[args["style_preset"]],
+                    negative=args.get("negative"),
+                    lora=args.get("lora"),
+                    lora_strength=args.get("lora_strength"),
+                    upscale=upscale,
+                    upscale_model=upscale_model,
                 )
-            except (ValueError, OSError) as exc:
-                # A postprocess rejection must reach the agent with a
-                # machine-readable code, never as a bare ValueError/OSError
-                # (Pillow raises OSError subclasses for corrupt input).
-                raise PostprocessFailedError(
-                    "POSTPROCESS_FAILED: postprocess rejected the request: %s"
-                    % (exc,)
-                ) from exc
-            files = processed["files"]
+                self._track_job(jid, backend_job_id)
+                self._emit(
+                    progress, 1, 4, "generating on ComfyUI (job %s)" % backend_job_id
+                )
+                fetched = self._fetch_png_and_seed(backend_job_id, progress)
+                self._untrack_job(jid)
+                seed = args["seed"] if index == 0 else None
+                if seed is None:
+                    seed = fetched.get("seed")
+                if seed is None:  # neither caller nor backend supplied one (mirrors C2)
+                    seed = random.randint(0, 0xFFFFFFFF)
+                stem = variant_target.stem
+                self._emit(progress, 2, 4, "postprocessing (remove_bg, trim, exports)")
+                resize_to = (
+                    (output_width, output_height) if upscale > 1 else None
+                )
+                try:
+                    processed = self._postprocess(
+                        bytes(fetched["png_bytes"]),
+                        remove_bg=args["remove_bg"],
+                        model=args["remove_bg_model"],
+                        trim=True,
+                        sizes=(1, 2, 3),
+                        stem=stem,
+                        vectorize=args["format"] == "svg",
+                        icon_sizes=args.get("icon_sizes"),
+                        ico=args.get("ico", False),
+                        seamless=args.get("seamless", False),
+                        palette=args.get("palette"),
+                        symmetry=args.get("symmetry"),
+                        resize_to=resize_to,
+                    )
+                except (ValueError, OSError) as exc:
+                    # A postprocess rejection must reach the agent with a
+                    # machine-readable code, never as a bare ValueError/OSError
+                    # (Pillow raises OSError subclasses for corrupt input).
+                    raise PostprocessFailedError(
+                        "POSTPROCESS_FAILED: postprocess rejected the request: %s"
+                        % (exc,)
+                    ) from exc
+                processed_variants.append(
+                    {
+                        "target": variant_target,
+                        "stem": stem,
+                        "seed": seed,
+                        "files": processed["files"],
+                    }
+                )
+            first = processed_variants[0]
+            target = first["target"]
+            seed = first["seed"]
+            stem = first["stem"]
+            for item in processed_variants:
+                item_files = item["files"]
+                item_stem = item["stem"]
+                if args["format"] == "svg":
+                    # format=svg delivers the vector asset only: the requested
+                    # leaf is the written file, so PNG siblings are not written.
+                    item_files = [
+                        entry
+                        for entry in item_files
+                        if isinstance(entry, dict)
+                        and str(entry.get("filename", "")).endswith(".svg")
+                    ]
+                    if not item_files:
+                        raise PostprocessFailedError(
+                            "POSTPROCESS_FAILED: postprocess produced no SVG entry"
+                        )
+                else:
+                    # C1 v0.7: the base PNG carries its provenance as tEXt
+                    # chunks (best-effort; re-encode is lossless).
+                    for entry in item_files:
+                        if (
+                            isinstance(entry, dict)
+                            and entry.get("filename") == f"{item_stem}.png"
+                        ):
+                            entry["png_bytes"] = _embed_png_metadata(
+                                bytes(entry["png_bytes"]),
+                                {
+                                    "software": (
+                                        f"mcp-local-asset-gen/{SERVER_VERSION}"
+                                    ),
+                                    "prompt": args["prompt"],
+                                    "negative": args.get("negative"),
+                                    "category": args["category"],
+                                    "style_preset": args["style_preset"],
+                                    "seed": item["seed"],
+                                    "job_id": jid,
+                                    "width": args["width"],
+                                    "height": args["height"],
+                                    "remove_bg_model": args["remove_bg_model"],
+                                },
+                            )
+                            break
+                item["files"] = item_files
+            files = first["files"]
             # include_image attaches the @1x PNG (the pipeline's first
             # entry) as MCP ImageContent; it exists for every format.
             # A seamless tile prefers the 2x2 preview so the caller can
@@ -687,61 +958,81 @@ class AssetOrchestrator:
                     ),
                     base_png,
                 )
-            if args["format"] == "svg":
-                # format=svg delivers the vector asset only: the requested
-                # leaf is the written file, so PNG siblings are not written.
-                files = [
-                    entry
-                    for entry in files
-                    if isinstance(entry, dict)
-                    and str(entry.get("filename", "")).endswith(".svg")
-                ]
-                if not files:
-                    raise PostprocessFailedError(
-                        "POSTPROCESS_FAILED: postprocess produced no SVG entry"
-                    )
-            if args["format"] == "png":
-                # C1 v0.7: the base PNG carries its provenance as tEXt chunks
-                # (best-effort; re-encode is lossless).
-                for entry in files:
-                    if (
-                        isinstance(entry, dict)
-                        and entry.get("filename") == f"{stem}.png"
-                    ):
-                        entry["png_bytes"] = _embed_png_metadata(
-                            bytes(entry["png_bytes"]),
-                            {
-                                "software": f"mcp-local-asset-gen/{SERVER_VERSION}",
-                                "prompt": args["prompt"],
-                                "negative": args.get("negative"),
-                                "category": args["category"],
-                                "style_preset": args["style_preset"],
-                                "seed": seed,
-                                "job_id": jid,
-                                "width": args["width"],
-                                "height": args["height"],
-                                "remove_bg_model": args["remove_bg_model"],
-                            },
-                        )
-                        break
-            self._write_files(
-                files,
-                target,
-                approved_roots,
-                allow_any_path=self._allow_any_path(),
-            )
+            written: list = []
+            for item in processed_variants:
+                self._write_files(
+                    item["files"],
+                    item["target"],
+                    approved_roots,
+                    allow_any_path=self._allow_any_path(),
+                )
+                base_entry = next(
+                    (
+                        entry
+                        for entry in item["files"]
+                        if isinstance(entry, dict)
+                        and entry.get("filename") == f"{item['stem']}.png"
+                    ),
+                    None,
+                )
+                if isinstance(base_entry, dict) and isinstance(
+                    base_entry.get("width"), int
+                ) and isinstance(base_entry.get("height"), int):
+                    # Report the REAL written size: trim/pad (and the
+                    # postprocess chain generally) may shrink the canvas
+                    # below width*upscale, and the agent embeds this file.
+                    item["output_width"] = int(base_entry["width"])
+                    item["output_height"] = int(base_entry["height"])
+                else:
+                    item["output_width"] = output_width
+                    item["output_height"] = output_height
+                written.append(item)
             self._emit(progress, 3, 4, "files written, recording result")
+            sheet_info = None
+            if args.get("contact_sheet") and len(written) > 1:
+                sheet_info = self._write_contact_sheet(
+                    written, target, approved_roots, args
+                )
+            assets = [
+                {
+                    "index": index,
+                    "seed": item["seed"],
+                    "asset_path": self._relative_posix(
+                        item["target"], approved_roots
+                    ),
+                    "asset_path_absolute": os.fspath(item["target"]),
+                }
+                for index, item in enumerate(written)
+            ]
+            first_asset = assets[0]
+            written_output = written[0]
             result = {
-                "asset_path": self._relative_posix(target, approved_roots),
-                "asset_path_absolute": os.fspath(target),
+                "asset_path": first_asset["asset_path"],
+                "asset_path_absolute": first_asset["asset_path_absolute"],
                 "asset_root": self._owning_root(target, approved_roots),
+                # width/height keep the C1 meaning: the REQUESTED
+                # generation size. The written file's real size is
+                # output_width/output_height (trim/pad applies).
                 "width": args["width"],
                 "height": args["height"],
                 "format": args["format"],
                 "seed": seed,
                 "style_preset": args["style_preset"],
                 "job_id": jid,
+                "upscale": upscale,
+                "output_width": written_output["output_width"],
+                "output_height": written_output["output_height"],
+                "variants": variants,
+                "assets": assets,
             }
+            if sheet_info is not None:
+                result["contact_sheet_path"] = sheet_info["asset_path"]
+                result["contact_sheet_path_absolute"] = sheet_info[
+                    "asset_path_absolute"
+                ]
+                result["contact_sheet_manifest_path"] = sheet_info[
+                    "manifest_asset_path"
+                ]
             if args.get("include_image"):
                 if base_png is None:
                     raise PostprocessFailedError(

@@ -7,6 +7,14 @@ Authoritative owner: PQM0. BASELINED v0.1.1 — controlled amendments only.
 of the `rembg d` CLI — the `rembg` CLI extra is not installed (dependency
 conflict, see requirements.txt); no normative requirement changed.)
 
+- v0.6 (2026-11-08, release v0.8.0) adds `resize_to` and the
+  `postprocess/sheet.py` contact-sheet ops — see the v0.6 addendum at the
+  end of this file. Re-verify the current content hash with
+  `scripts/hash_contract.py` (tracked in-repo since v0.8); the v0.1.1
+  baseline below is retained for history.
+- v0.6 content hash:
+  `sha256:47A8A9E911072EF20485B44CFAE6A25FEB9CE9A1938C5E7291712FAA7A9A2B2B`
+
 - ID / version / content hash: `C3-processed-asset` / `v0.1.1` /
   `sha256:8563E3EA83F5129D24A6BA17A1D4F64D8E604D97A6BE5E4D1C4BF48B6345D0D3`
   frozen 2026-10-18; re-frozen 2026-10-23 after the documentation erratum
@@ -125,3 +133,28 @@ Additive to v0.4.
   (verified present in the pinned rembg 2.0.85; models download once per
   user cache on first use). `u2net` remains the default;
   `bria-rmbg` keeps its LICENSE_REQUIRED gate.
+## Addendum v0.6 (2026-11-08) — resize target + contact sheet
+
+Additive to v0.5 (release v0.8.0).
+
+- `process(..., resize_to=None)`: an optional `(width, height)` pair of
+  positive ints. Validated up-front (`INVALID_RESIZE_TO` before any
+  decode/segmentation), applied with LANCZOS to the base image right
+  AFTER background removal and the geometry stages but BEFORE trim/pad,
+  palette, vectorization, the `@Nx` exports, icon renders and `.ico` —
+  so every derived entry is sized off the final resized base.
+  `resize_to=None` is a strict no-op (pre-v0.8 output is byte-identical).
+  Used by C1 when a real model upscale ran: the ComfyUI weight dictates
+  its own factor, and this brings the base to the requested target.
+- New module `postprocess/sheet.py` (pure Pillow, no disk I/O):
+  `layout_grid(count, *, columns=None)`, `compose_contact_sheet(images,
+  *, columns=None, cell_px=512, gap_px=8, background=(0,0,0,0),
+  border_rgba=None) -> {png_bytes, width, height, columns, rows, cell_px,
+  count}` and `build_manifest(entries, *, sheet=None)`.
+  `compose_contact_sheet` fits each PNG inside its cell with the aspect
+  ratio preserved (LANCZOS) and centers it on a transparent canvas of
+  `columns*cell_px + (columns+1)*gap_px` (same vertically).
+  `build_manifest` returns the deterministic
+  `{"schema": "asset-gen/contact-sheet/1", "count", "entries"}` dict
+  sorted by `index`, copying only JSON-scalar extras and never embedding
+  image bytes.

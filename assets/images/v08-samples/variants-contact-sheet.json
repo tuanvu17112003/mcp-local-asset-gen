@@ -1,0 +1,29 @@
+{
+  "schema": "asset-gen/contact-sheet/1",
+  "count": 3,
+  "entries": [
+    {
+      "index": 1,
+      "filename": "tri.png",
+      "seed": 3558437788
+    },
+    {
+      "index": 2,
+      "filename": "tri-v2.png",
+      "seed": 2006713704
+    },
+    {
+      "index": 3,
+      "filename": "tri-v3.png",
+      "seed": 3551495828
+    }
+  ],
+  "sheet": {
+    "filename": "tri-sheet.png",
+    "width": 1048,
+    "height": 1048,
+    "columns": 2,
+    "rows": 2,
+    "cell_px": 512
+  }
+}

@@ -7,12 +7,10 @@
         "type": "local",
         "command": [
           "H:/TESTMultiAI/CodeGraph/TEST/V3.7.0_Test/.venv/Scripts/python.exe",
-          "-m",
-          "src.mcp_server.server",
+          "H:/TESTMultiAI/CodeGraph/TEST/V3.7.0_Test/asset-gen.py",
           "--comfyui-url",
           "http://127.0.0.1:8000"
-        ],
-        "cwd": "H:/TESTMultiAI/CodeGraph/TEST/V3.7.0_Test"
+        ]
       }
     }
   },
@@ -20,4 +18,3 @@
     "subagent_depth": 2
   }
 }
-
